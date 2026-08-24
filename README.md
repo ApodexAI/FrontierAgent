@@ -6,6 +6,8 @@
 
 ---
 
+<br>
+
 <div align="center">
   <a href="https://www.apodex.ai"><img alt="Online Service" src="https://img.shields.io/badge/🤖%20Online_Service-Apodex_1.1-1783ff"/></a>
   <a href="https://www.apodex.com/"><img alt="Homepage" src="https://img.shields.io/badge/Homepage-Apodex_AI-white"/></a>
