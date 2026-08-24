@@ -1,0 +1,166 @@
+[project]
+name = "frontier-agent"
+version = "0.1.0"
+description = "FrontierAgent — build and evaluate LLM agent workflows"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+    "openai>=1.50",
+    "anthropic>=0.34",
+    "httpx>=0.27",
+    "trafilatura>=1.12",
+    "python-dotenv>=1.0",
+    "rich>=14.0",
+    "textual>=8.0",
+    "jinja2>=3.1.6",
+    "tiktoken>=0.12.0",
+    "pyyaml>=6.0",
+    "tenacity>=9.1.4",
+    "Pillow>=10.0",
+    # create_file promises Office authoring in every runtime. Keep its writers
+    # deterministic instead of relying on an in-session pip install.
+    "openpyxl>=3.1",
+    "python-docx>=1.1",
+    "python-pptx>=0.6.23",
+]
+
+[project.optional-dependencies]
+document-readers = [
+    "python-docx>=1.1",
+    "python-pptx>=0.6.23",
+    "pypdf>=4.0",
+]
+plugins = [
+    "tavily-python>=0.5.0",
+    "firecrawl-py>=1.0.0",
+    "browserbase>=0.1.0",
+]
+sandbox = [
+    "e2b-code-interpreter>=2.6.0",
+    "numpy>=1.26",
+    "openpyxl>=3.1",
+    "pandas>=2.0",
+]
+eval = [
+    "datasets>=4.8.4",
+    "pandas>=2.0",
+    "harbor>=0.4.0",
+    "huggingface-hub>=0.20",
+    "openpyxl>=3.1",
+    "python-docx>=1.1",
+    "python-pptx>=0.6.23",
+    "pypdf>=4.0",
+]
+dev = [
+    "openpyxl>=3.1",
+    "pypdf>=4.0",
+    "python-docx>=1.1",
+    "python-pptx>=0.6.23",
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.7",
+    # ``[nodejs]`` bundles the Node runtime pyright needs, so neither CI nor a
+    # contributor's machine requires a system node install. Keep the version
+    # close to the pyright build bundled with the VS Code Pylance extension —
+    # the two are separate builds and a drift shows up as a rule that fires in
+    # CI but not in the editor.
+    "pyright[nodejs]>=1.1.400",
+    # The only two dependencies that ship no ``py.typed``; every other runtime
+    # dep is inline-typed. PyYAML matters most: it is the yaml.safe_load at
+    # both config entry points (frontier_agent/infra/config.py,
+    # apodex/profiles/__init__.py), so without stubs both return ``Any``.
+    "types-PyYAML",
+    "types-openpyxl",
+]
+hf-space = [
+    "gradio>=6.0,<7",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests", "apodex/tests"]
+
+[project.scripts]
+# ``apodex`` remains as a compatibility alias for existing users.
+frontier-agent = "apodex.cli:main"
+apodex = "apodex.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["frontier_agent", "apodex", "plugins", "workflows", "benchmarks"]
+
+# PEP 561 marker, shipped for frontier_agent only. That package is the framework
+# surface downstream code imports, and it is pyright-clean. The marker is a
+# promise that the annotations are checked, so it is not added to a package until
+# that package is enforced — see pyrightconfig.json for what is currently gated.
+[tool.hatch.build.targets.wheel.force-include]
+"frontier_agent/py.typed" = "frontier_agent/py.typed"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+# Beyond ruff's default E4/E7/E9/F. ANN is the one that keeps the typing work
+# from eroding: it fails a new function that lands without annotations. FA keeps
+# the `from __future__ import annotations` convention already used in 415 of the
+# 478 files.
+select = [
+    "E",     # pycodestyle
+    "F",     # pyflakes
+    "I",     # isort
+    "UP",    # pyupgrade
+    "FA",    # future-annotations
+    "ANN",   # missing annotations
+    "B",     # bugbear
+    "SIM",   # simplify
+    "RUF",   # ruff-specific
+]
+# Deliberately NOT selected: "TC" (typing-only imports). It would move type
+# imports into `if TYPE_CHECKING:` blocks, but `@tool` functions have their
+# annotations resolved at *runtime* by typing.get_type_hints in
+# frontier_agent/core/tool.py:_infer_parameters, which builds each tool's JSON
+# schema. Hiding those imports from the interpreter breaks tool schema
+# inference, and pydantic models in frontier_agent/models/ have the same
+# requirement for field validation.
+ignore = [
+    # `Any` is legitimate *as an input* at the JSON / LLM-response boundaries
+    # (tool-call args, provider payloads); the rule is that it must be narrowed
+    # before it travels inward, not that it never appears.
+    "ANN401",
+    # Line length is reported by E501 but not enforced by a formatter in CI;
+    # leaving it on would fail the build on pre-existing lines.
+    "E501",
+    # Ambiguous-unicode rules. This codebase uses non-ASCII on purpose and
+    # everywhere: box-drawing and arrows in the TUI, em dashes in prose, and CJK
+    # in the benchmark datasets and judges. 4276 hits, none of them defects.
+    "RUF001",
+    "RUF002",
+    "RUF003",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests are outside the pyright gate too (see pyrightconfig.json "ignore"):
+# 434 unannotated defs live here and the payoff is near zero.
+"tests/**" = ["ANN", "SIM115"]
+"apodex/tests/**" = ["ANN", "SIM115"]
+"benchmarks/**" = ["ANN"]
+# Concatenation fragments, not modules — shared helpers resolve only after
+# _create_file.py / _doc_reader.py join them, hence the existing F821 waivers.
+"plugins/tools/_reader_*.py" = ["ANN", "F821", "SIM115"]
+"plugins/tools/_writer_*.py" = ["ANN", "F821", "SIM115"]
+# The per-attempt delta/finish closures are created and consumed inside a single
+# retry iteration and rely on `nonlocal`, so binding the loop variables as
+# default arguments (B023's fix) would change their behaviour.
+"frontier_agent/core/runtime/loop/_call.py" = ["B023"]
+
+[tool.ruff.lint.isort]
+known-first-party = [
+    "frontier_agent", "apodex", "plugins", "workflows", "benchmarks",
+]

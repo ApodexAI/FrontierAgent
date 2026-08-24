@@ -1,0 +1,19 @@
+name: react
+description: Native Stateful ReAct workflow with web research and local tools.
+
+# This is deliberately a workflow profile, not the terminal's generic loop.
+workflow: stateful-react-agent
+workflow_profile: tui
+
+llm:
+  provider: ${OPENAI_PROVIDER:-openai}
+  model: ${OPENAI_MODEL}
+  base_url: ${OPENAI_BASE_URL}
+  api_key: ${OPENAI_API_KEY}
+  temperature: 1.0
+  max_tokens: ${OPENAI_MAX_TOKENS:-32768}
+  context_window: ${OPENAI_CONTEXT_WINDOW:-262144}
+# Turn budgets live in the selected workflow profile. ``agent.max_turns`` here
+# would configure apodex's generic loop, which workflow dispatch does not run.
+tools: [web_search, web_fetch, bash, grep_search, glob_search, read_file, todo_write]
+skills: []

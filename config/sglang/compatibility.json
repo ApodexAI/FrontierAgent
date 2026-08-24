@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "native": {
+    "minimum_driver_major": 525,
+    "model_minimum_sglang": [
+      {
+        "model_prefix": "Qwen/Qwen3.5",
+        "minimum_version": "0.5.10"
+      },
+      {
+        "model_prefix": "apodex/Apodex-1.1",
+        "minimum_version": "0.5.10"
+      }
+    ],
+    "tracks": [
+      {
+        "id": "cu12",
+        "support_tier": "compatibility_hint",
+        "cuda_major": 12,
+        "driver_minimum_major": 525,
+        "jit_toolkit_minimum": "12.9",
+        "required_jit_headers": [
+          "curand.h"
+        ],
+        "sglang_minimum": "0.5.10",
+        "sglang_maximum_exclusive": "0.5.11",
+        "recommended_sglang": "0.5.10.post1"
+      },
+      {
+        "id": "cu13",
+        "support_tier": "official_default",
+        "cuda_major": 13,
+        "driver_minimum_major": 580,
+        "jit_toolkit_minimum": "13.0",
+        "required_jit_headers": [
+          "curand.h"
+        ],
+        "sglang_minimum": "0.5.11",
+        "recommended_sglang": "0.5.17"
+      }
+    ]
+  },
+  "container": {
+    "tracks": [
+      {
+        "id": "cu12",
+        "sglang": "0.5.10.post1",
+        "base_image": "lmsysorg/sglang:v0.5.10.post1-runtime",
+        "base_image_digest": "sha256:dd1814f838d9cabf785057c146fd311b2c8cfa18f20148b22d6f4baf3b55265b"
+      },
+      {
+        "id": "cu13",
+        "sglang": "0.5.17",
+        "base_image": "lmsysorg/sglang:v0.5.17-runtime",
+        "base_image_digest": "sha256:3ea7c6d74312d964edbcf9b3819425ea42117eb967ef1cfec632a70c926027df"
+      }
+    ]
+  }
+}

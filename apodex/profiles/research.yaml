@@ -1,0 +1,36 @@
+# Built-in "research" profile for apodex.
+# See coding.yaml for how credentials resolve (.env holds only the secrets).
+# Copy this file to ~/.apodex/profiles/research.yaml to override it.
+name: research
+description: Search the web, read primary sources, synthesize a cited answer.
+
+llm:
+  provider: openai
+  # First entry is the default; switch at runtime with `/model <name|number>`.
+  models:
+    - ${OPENAI_MODEL:-gpt-4o}
+    - gpt-5-mini
+    - gpt-4o-mini
+  temperature: 0.0
+  # Left at 0 deliberately — see coding.yaml for the full note. Short version:
+  # the deadlock that forces temperature off 0 in `workflows/*/profiles/` is
+  # specific to SGLang's argmax path on a self-hosted Apodex checkpoint, and this
+  # profile defaults to `gpt-4o` on `provider: openai`. For a self-hosted endpoint
+  # add `temperature: 1.0` / `top_p: 0.95` / `extra_body: {top_k: 20}`; never send
+  # those to an OpenAI-family endpoint, which rejects them.
+  max_tokens: 8192
+  context_window: ${OPENAI_CONTEXT_WINDOW:-128000}
+
+agent:
+  base_prompt: research
+  system_prompt: ""
+  max_turns: 50
+
+tools:
+  - web_search
+  - web_fetch
+  - bash
+  - read_file
+  - todo_write
+
+skills: []

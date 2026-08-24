@@ -1,0 +1,62 @@
+# Secrets / env
+.env
+.env.*
+!.env.example
+!.env.sglang.example
+!.env.transformers.example
+!**/.env.space.example
+config.yaml
+.omx/
+.apodex/
+.vscode/
+
+# Tooling caches
+.venv/
+.venv-sglang/
+.uv-cache/
+.ruff_cache/
+.pytest_cache/
+__pycache__/
+*.py[codz]
+*.tsbuildinfo
+
+# OS
+.DS_Store
+
+# Frontend
+node_modules/
+frontend/.next/
+frontend/tmp/
+
+# Python build / packaging
+*.egg-info/
+dist/
+
+# SQLite scratch
+*.db
+*.db-shm
+*.db-wal
+
+# Jupyter
+**/.ipynb_checkpoints/
+
+# Eval / run outputs
+benchmarks/public/results/
+benchmarks/public/tasks-generated/
+# Legacy pre-rename paths: untracked corpora/artifacts still sit here on older
+# checkouts, and un-ignoring them puts multi-GB (and license-gated) data one
+# `git add -A` away from a commit.
+benchmarks/results/
+benchmarks/tasks-generated/
+experiments/
+results/
+logs/
+tmp/
+temp/
+data/
+benchmarks/public/datasets
+benchmarks/datasets
+private/
+
+# User specific claude configurations
+.claude

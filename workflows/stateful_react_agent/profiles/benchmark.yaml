@@ -1,0 +1,41 @@
+# Long-running single-agent benchmark profile with tiered context compaction and
+# no filesystem-backed recovery cache.
+llm:
+  model: ${OPENAI_MODEL}
+  api_key: ${OPENAI_API_KEY}
+  base_url: ${OPENAI_BASE_URL}
+  # Not 0.0: at temperature 0 sglang takes the argmax path, which turns a
+  # reasoning runaway into a deterministic deadlock the loop cannot leave (a
+  # runaway context resampled 4x at temp=0 returned byte-identical output; one
+  # question burned 176 minutes over 117 runaways). See
+  # workflows/agent_team/profiles/benchmark.yaml for the full measurement.
+  # Values are the model's generation_config.json defaults. Moving temperature
+  # is the load-bearing part — top_p/top_k are inert while it is 0.
+  temperature: 1.0
+  top_p: 0.95
+  extra_body:
+    top_k: 20
+  max_tokens: 32768
+
+agent:
+  main_max_turns: 200
+  tool_timeout_s: 900
+  llm_timeout_s: 600
+  reasoning_only_timeout_s: 120
+  reasoning_only_max_tokens: 16384
+  logical_call_timeout_s: 900
+  thinking_in_history: true
+  keep_last_k: 5
+  # `tiered` differs from `off`: near 80% of max_len it first blanks old
+  # tool-result bodies, then summarizes older conversation if still above 60%.
+  context_compaction: tiered
+  compaction_spill: ${COMPACTION_SPILL:-false}
+  # Lower OPENAI_CONTEXT_WINDOW in stress runs to trigger the same tiered policy
+  # earlier without changing its 80% trigger / 60% relief geometry.
+  max_len: ${OPENAI_CONTEXT_WINDOW:-262144}
+  tier1_keep_tool_result: 5
+  keep_recent_turns: 5
+  max_input_tokens: ${OPENAI_MAX_INPUT_TOKENS:-229376}
+  agent_tools: [web_search, web_fetch, bash, download_file, grep_search, glob_search, recover_result]
+  web_search_impl: original
+  web_fetch_impl: original

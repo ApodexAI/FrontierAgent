@@ -1,0 +1,55 @@
+# Deterministic agent-team baseline: keep five recent tool results and never
+# call an LLM to summarize history.
+llm:
+  provider: ${OPENAI_PROVIDER:-openai}
+  model: ${OPENAI_MODEL}
+  base_url: ${OPENAI_BASE_URL}
+  api_key: ${OPENAI_API_KEY}
+  # Not 0.0: at temperature 0 sglang takes the argmax path, which turns a
+  # reasoning runaway into a deterministic deadlock the loop cannot leave (a
+  # runaway context resampled 4x at temp=0 returned byte-identical output).
+  # See workflows/agent_team/profiles/benchmark.yaml for the full measurement.
+  # Values are the model's generation_config.json defaults. Moving temperature
+  # is the load-bearing part — top_p/top_k are inert while it is 0.
+  temperature: 1.0
+  top_p: 0.95
+  extra_body:
+    top_k: 20
+  max_tokens: ${OPENAI_MAX_TOKENS:-32768}
+
+report_llm:
+  provider: ${OPENAI_PROVIDER:-openai}
+  model: ${OPENAI_MODEL}
+  base_url: ${OPENAI_BASE_URL}
+  api_key: ${OPENAI_API_KEY}
+  # Deliberately 0.0: one tool-free synthesis call, no loop to deadlock in.
+  temperature: 0.0
+  max_tokens: ${OPENAI_MAX_TOKENS:-32768}
+  llm_timeout_s: 600
+
+agent:
+  reporter_backend: fast
+  main_max_turns: 200
+  sub_max_turns: 100
+  tool_timeout_s: 360
+  llm_timeout_s: 600
+  reasoning_only_timeout_s: 120
+  reasoning_only_max_tokens: 16384
+  logical_call_timeout_s: 900
+  thinking_in_history: true
+  # `off` only blanks older tool-result bodies, keeping the latest five. It
+  # never summarizes user/assistant history, so very long runs can still fill
+  # the context window.
+  context_compaction: "off"
+  main_keep_tool_result: 5
+  sub_keep_tool_result: 5
+  compaction_spill: false
+  max_input_tokens: ${OPENAI_MAX_INPUT_TOKENS:-229376}
+  team_effort: max
+  planning_mode: false
+  planning_max_turns: 40
+  fresh_execution_context: false
+  web_search_impl: original
+  web_fetch_impl: aligned
+  main_agent_tools: [create_subagent, assign_task, collect_reports, stop_subagent, add_task, update_task, finish_planning, grep_search, glob_search, web_search]
+  sub_agent_tools: [web_search, web_fetch, submit_report, bash, download_file, grep_search, glob_search, read_file, create_file, recover_result]

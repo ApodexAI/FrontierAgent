@@ -1,0 +1,5 @@
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: ${APODEX_DOCKER_SUBNET:?set APODEX_DOCKER_SUBNET in the SGLang env file}

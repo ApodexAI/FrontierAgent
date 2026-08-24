@@ -1,0 +1,30 @@
+{
+  "question_id": 38,
+  "question": "看看DOCBENCH (Zou et al., 2025) 这篇论文的数据，帮我分析一下他们bench的gt答案的平均长度是多少？",
+  "dataset_stats": {
+    "sample_count": 1102,
+    "gt_total_characters": 68524,
+    "average_character_length": 62.18
+  },
+  "standard_answer": {
+    "目标指标": "平均字符长度",
+    "标准值": 62.18,
+    "单位": "字符"
+  },
+  "scoring_rule": {
+    "per_question_score": 1,
+    "correct_if": [
+      "模型主答案被抽取为 numeric 或 range。",
+      "答案口径明确是平均字符长度，而不是 token、word 或其他指标。",
+      "若为 numeric：与 62.18 的绝对误差 <= 5.0，则判对。",
+      "若为 range：取区间中点与 62.18 比较，绝对误差 <= 5.0，则判对。"
+    ],
+    "wrong_if": [
+      "主答案为 unavailable / ambiguous / other。",
+      "主答案单位不是字符长度。",
+      "数值与 62.18 相差过大。"
+    ],
+    "absolute_tolerance": 5.0,
+    "zero_score_rule": "若模型没有给出可比较的平均字符长度，或给出的字符长度不在容差内，则总分为 0 分。"
+  }
+}

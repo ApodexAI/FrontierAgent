@@ -1,0 +1,165 @@
+{
+  "question_id": 4,
+  "question": "从1945年到2026年，全球所有核电站累计发生过多少次INES 4级及以上的核事故？请逐一列出每次事故的时间、地点、反应堆型号、事故等级、直接原因，以及事故后该国核电政策的具体变化（如立法、关停、新建冻结等）。对比这些事故前后5年内该国的核电发电量占比变化数据。",
+  "database_type": "simple_8_item_reference",
+  "evaluation_note": "用于第4题评估。strict 表示严格应计入；lenient 表示宽松可接受。",
+  "strict_count": 6,
+  "lenient_total_count": 8,
+  "items": [
+    {
+      "name": "Saint-Laurent A1",
+      "aliases": [
+        "圣洛朗A1",
+        "Saint-Laurent-des-Eaux A1"
+      ],
+      "accept_level": "strict",
+      "date": "1969-10-17",
+      "location": "Saint-Laurent-des-Eaux nuclear power station, Loir-et-Cher, France",
+      "reactor_type": "UNGG (uranium naturel graphite gaz / gas-cooled graphite-moderated reactor)",
+      "ines_level": 4,
+      "direct_cause": "During refuelling, a graphite flow-control piece was mistakenly placed instead of a fuel element, partially blocking a CO2-cooled channel and melting 5 fuel elements.",
+      "policy_change": "No national phase-out; France continued nuclear expansion but the Saint-Laurent accidents later reinforced abandonment of the UNGG line in favour of PWRs.",
+      "power_share_change": "Open official series for exact 1964-1974 annual national nuclear shares were not found in one consistent source during this pass; use caution if a model gives precise annual percentages.",
+      "sources": [
+        "https://www.asn.fr/autres-activites/situations-d-urgence/accidents-en-france-dans-les-anciens-reacteurs-a1-et-a2-de-saint-laurent"
+      ]
+    },
+    {
+      "name": "Bohunice A-1",
+      "aliases": [
+        "博胡尼采A1",
+        "Jaslovske Bohunice A-1"
+      ],
+      "accept_level": "strict",
+      "date": "1977-02-22",
+      "location": "Jaslovske Bohunice A-1, present-day Slovakia",
+      "reactor_type": "KS-150 HWGCR (heavy-water moderated, CO2-cooled power reactor)",
+      "ines_level": 4,
+      "direct_cause": "During refuelling, a fuel-loading error led to fuel damage and extensive contamination/corrosion; the serious 1977 event is described as INES 4 in Slovak INIS records.",
+      "policy_change": "A-1 was permanently shut down; the programme shifted to Soviet VVER reactors.",
+      "power_share_change": "National pre/post 5-year share figures were not resolved from a single official open series in this pass.",
+      "sources": [
+        "https://pris.iaea.org/PRIS/CountryStatistics/ReactorDetails.aspx?current=543&mobile-app=true&theme=false",
+        "https://inis.iaea.org/records/em0nc-x5w87"
+      ]
+    },
+    {
+      "name": "Three Mile Island Unit 2",
+      "aliases": [
+        "三里岛2号机",
+        "TMI-2",
+        "Three Mile Island-2"
+      ],
+      "accept_level": "strict",
+      "date": "1979-03-28",
+      "location": "Near Middletown, Pennsylvania, USA",
+      "reactor_type": "PWR",
+      "ines_level": 5,
+      "direct_cause": "Equipment malfunctions, design-related problems and worker errors; a stuck-open pilot-operated relief valve plus misleading instrumentation led operators to miss a loss-of-coolant accident and the core partially melted.",
+      "policy_change": "NRC tightened oversight and made sweeping changes to emergency planning, operator training, human factors, inspections and plant design/equipment requirements.",
+      "power_share_change": "The 5-year post-accident U.S. nuclear share rose rather than fell. Responses claiming a 1979-1984 decline are inconsistent with the EIA series.",
+      "sources": [
+        "https://www.nrc.gov/reading-rm/doc-collections/fact-sheets/3mile-isle.html",
+        "https://www.eia.gov/totalenergy/data/annual/txt/ptb0902.html"
+      ]
+    },
+    {
+      "name": "Saint-Laurent A2",
+      "aliases": [
+        "圣洛朗A2",
+        "Saint-Laurent-des-Eaux A2"
+      ],
+      "accept_level": "strict",
+      "date": "1980-03-13",
+      "location": "Saint-Laurent-des-Eaux nuclear power station, Loir-et-Cher, France",
+      "reactor_type": "UNGG",
+      "ines_level": 4,
+      "direct_cause": "Corrosion caused attachments of an internal primary-circuit plate to fail; the plate was carried by the CO2 flow, blocked several channels, and melted 2 fuel elements (about 20 kg uranium).",
+      "policy_change": "The reactor returned to operation in 1984, but the Saint-Laurent accidents are treated by ASN as part of the historical end of the UNGG line and transition to PWRs.",
+      "power_share_change": "French official sources in this pass support the qualitative conclusion that nuclear share surged in the late 1970s and 1980s; a conflicting claim that the 5-year post-1980 share fell is not supported by the regulator history pages reviewed.",
+      "sources": [
+        "https://www.asn.fr/autres-activites/situations-d-urgence/accidents-en-france-dans-les-anciens-reacteurs-a1-et-a2-de-saint-laurent",
+        "https://www.asn.fr/publications/2024/Les-cahiers-Histoire-de-lASN-01/11/"
+      ]
+    },
+    {
+      "name": "Chernobyl Unit 4",
+      "aliases": [
+        "切尔诺贝利4号机",
+        "Chernobyl-4"
+      ],
+      "accept_level": "strict",
+      "date": "1986-04-26",
+      "location": "Chernobyl nuclear power plant, Ukraine (then USSR)",
+      "reactor_type": "RBMK",
+      "ines_level": 7,
+      "direct_cause": "During an improper low-power test, safety measures were ignored; the reactor went out of control, exploded and burned. RBMK design weaknesses and lack of a containment structure aggravated the event.",
+      "policy_change": "Internationally, the accident directly led to the 1986 Early Notification and Assistance Conventions. IAEA notes that all RBMK units were upgraded to eliminate the design deficiencies that contributed to the accident.",
+      "power_share_change": "No single open official source with a clean USSR 1981-1991 annual nuclear-electricity-share series was verified in this pass. Models giving very precise percentages for the USSR should be treated cautiously unless they cite a primary statistical source.",
+      "sources": [
+        "https://www.iaea.org/newscenter/focus/chernobyl/faqs",
+        "https://www.iaea.org/topics/nuclear-safety-conventions/convention-early-notification-nuclear-accident",
+        "https://www.iaea.org/topics/nuclear-safety-conventions/convention-assistance-case-nuclear-accident-or-radiological-emergency"
+      ]
+    },
+    {
+      "name": "Fukushima Daiichi",
+      "aliases": [
+        "福岛第一核电站",
+        "Fukushima Daiichi NPS"
+      ],
+      "accept_level": "strict",
+      "date": "2011-03-11",
+      "location": "Fukushima Daiichi Nuclear Power Station, Japan",
+      "reactor_type": "BWRs",
+      "ines_level": 7,
+      "direct_cause": "The earthquake and tsunami caused loss of off-site power and flooding that disabled emergency equipment, leading to prolonged station blackout, core damage and hydrogen explosions.",
+      "policy_change": "Japan replaced the old regulator with the independent Nuclear Regulation Authority (NRA) and introduced more stringent regulatory requirements against extreme natural hazards and severe accidents.",
+      "power_share_change": "Responses that broadly describe a collapse from roughly one-quarter/one-third of electricity to near zero are directionally correct; claims of 2016 still being around 5% are too high against the WDI/IEA series.",
+      "sources": [
+        "https://www.iaea.org/newscenter/focus/fukushima",
+        "https://www.iaea.org/publications/10962/the-fukushima-daiichi-accident",
+        "https://www.enecho.meti.go.jp/en/category/whitepaper/pdf/whitepaper_2016.pdf",
+        "https://databank.worldbank.org/data/Japan-Electricity-Mix/id/bc368e24"
+      ]
+    },
+    {
+      "name": "Fermi-1",
+      "aliases": [
+        "Enrico Fermi Unit 1",
+        "Fermi Unit 1"
+      ],
+      "accept_level": "lenient",
+      "date": "1966-10",
+      "location": "Newport, Michigan, USA",
+      "reactor_type": "sodium-cooled fast breeder reactor",
+      "ines_level": ">=4 (retrospective classification used in secondary/IAEA-affiliated material; exact open regulator page with INES value not located in this pass)",
+      "direct_cause": "A zirconium plate came loose and blocked sodium coolant flow to some fuel subassemblies; two subassemblies began to melt.",
+      "policy_change": "The plant restarted later and was decommissioned in 1972. No clear nationwide U.S. nuclear policy reversal was identified from the official source reviewed.",
+      "power_share_change": "Use only qualitative scoring unless a model cites a primary statistical source.",
+      "sources": [
+        "https://www.nrc.gov/info-finder/decommissioning/power-reactor/enrico-fermi-atomic-power-plant-unit-1.html"
+      ]
+    },
+    {
+      "name": "Lucens",
+      "aliases": [
+        "吕森",
+        "Lucens experimental reactor"
+      ],
+      "accept_level": "lenient",
+      "date": "1969-01-21",
+      "location": "Lucens, Vaud, Switzerland",
+      "reactor_type": "HWGCR / heavy-water moderated, CO2-cooled experimental power reactor",
+      "ines_level": ">=4 retrospective, but exact open official page with an unambiguous INES number was not located in this pass",
+      "direct_cause": "A damaged constriction in the cooling circuit reduced coolant flow, causing overheating and melting of a fuel element, followed by pressure failure and limited radioactive release into the cavern.",
+      "policy_change": "The accident ended the Lucens project; the plant was permanently shut down and later decommissioned.",
+      "power_share_change": "Do not accept precise pre/post-5-year Swiss national share numbers unless the model cites a primary statistical source. Several model values conflict sharply.",
+      "sources": [
+        "https://ensi.admin.ch/en/topic/versuchsatomkraftwerk-lucens/",
+        "https://ensi.admin.ch/de/2012/05/17/serie-lucens-das-aus-fuer-das-versuchsatomkraftwerk/",
+        "https://pris.iaea.org/PRIS/CountryStatistics/ReactorDetails.aspx?current=966"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,82 @@
+services:
+  agent:
+    image: ${FRONTIER_AGENT_IMAGE:-ghcr.io/apodexai/frontieragent:latest}
+    pull_policy: always
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      APODEX_IN_CONTAINER: "1"
+      HOME: /root
+      SANDBOX_BACKEND: container
+      APODEX_LOCAL_UTC_OFFSET: ${APODEX_LOCAL_UTC_OFFSET:-+0000}
+      FRONTIER_AGENT_WORKSPACE_DIR: /workspace
+      APODEX_SESSION_WORKSPACES_ROOT: /apodex-runs
+      APODEX_WORKSPACE_LINK: /workspace
+      FRONTIER_AGENT_OUTPUTS_DIR: /outputs
+      APODEX_RUNS_ROOT: /apodex-runs
+      APODEX_RUNS_ROOT_PINNED: "1"
+      # User-visible host path. Helper launchers provide an absolute path;
+      # direct Compose runs show the equivalent path relative to this project.
+      APODEX_HOST_RUNS_ROOT: ${APODEX_HOST_RUNS_ROOT:-.apodex/runs}
+      APODEX_HOST_WORKSPACE_ROOT: ${APODEX_HOST_RUNS_ROOT:-.apodex/runs}
+      APODEX_SESSION_OUTPUTS_ROOT: /apodex-runs
+      APODEX_OUTPUTS_LINK: /outputs
+      APODEX_HOST_OUTPUTS_ROOT: ${APODEX_HOST_RUNS_ROOT:-.apodex/runs}
+      APODEX_INPUT_STAGING_ROOT: /apodex-inputs
+      FRONTIER_AGENT_INPUTS_ROOT: /inputs
+      # The helper launchers fill these from the invoking Linux user so files
+      # written by the dropped-privilege tool process keep useful host ownership.
+      APODEX_HOST_UID: ${APODEX_HOST_UID:-}
+      APODEX_HOST_GID: ${APODEX_HOST_GID:-}
+    volumes:
+      - .:/project
+      - ./.apodex/runs:/apodex-runs
+      - frontier-agent-inputs:/apodex-inputs
+      - frontier-agent-inputs:/inputs:ro
+      - frontier-agent-state:/root/.apodex
+      - frontier-agent-config:/root/.config/apodex
+    working_dir: /project
+    stdin_open: true
+    tty: true
+
+  eval:
+    image: ${FRONTIER_AGENT_IMAGE:-ghcr.io/apodexai/frontieragent:latest}
+    pull_policy: always
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      APODEX_IN_CONTAINER: "1"
+      # The eval runner can execute multiple isolated benchmark tasks in one
+      # harness container, so it retains the nested bubblewrap backend.
+      SANDBOX_BACKEND: bwrap
+      APODEX_HOST_UID: ${APODEX_HOST_UID:-}
+      APODEX_HOST_GID: ${APODEX_HOST_GID:-}
+    volumes:
+      - ./benchmarks/public/datasets:/app/benchmarks/public/datasets:ro
+      - ./results:/app/results
+    security_opt:
+      # Required only for nested bubblewrap; the interactive agent service
+      # above uses the outer container boundary and keeps Docker's seccomp.
+      - seccomp=unconfined
+    entrypoint:
+      # Keep the image entrypoint in front of the runner: it is what applies
+      # APODEX_HOST_UID/GID above, and it execs its arguments unchanged.
+      # Overriding it outright left ./results root-owned on the host.
+      - /app/docker/entrypoint.sh
+      - python
+      - -m
+      - benchmarks.public.runner.run_subprocess
+    command:
+      - --benchmark
+      - browsecomp
+      - --limit
+      - "1"
+      - --out
+      - /app/results/smoke
+
+volumes:
+  frontier-agent-inputs:
+  frontier-agent-state:
+  frontier-agent-config:

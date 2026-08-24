@@ -1,0 +1,16 @@
+.git
+.venv
+.env
+.apodex
+benchmarks/public/datasets
+benchmarks/public/results
+benchmarks/public/tasks-generated
+# Legacy pre-rename paths may still contain local corpora, generated ground
+# truth, and run artifacts in existing checkouts. Keep them out of remote build
+# contexts and images even though the current runtime no longer reads them.
+benchmarks/datasets
+benchmarks/results
+benchmarks/tasks-generated
+results
+__pycache__
+*.pyc

@@ -1,0 +1,94 @@
+services:
+  model:
+    image: ${SGLANG_IMAGE:-lmsysorg/sglang:v0.5.17}
+    entrypoint:
+      - python3
+      - /opt/frontier-agent/sglang_entrypoint.py
+    environment:
+      HF_TOKEN: ${HF_TOKEN:-}
+      HUGGING_FACE_HUB_TOKEN: ${HF_TOKEN:-}
+      SGLANG_MODEL_ID: ${SGLANG_MODEL_ID:-}
+      # A non-empty host path is mounted read-only below and translated to
+      # this stable container path. It takes precedence over SGLANG_MODEL_ID.
+      SGLANG_LOCAL_MODEL_PATH: ${SGLANG_LOCAL_MODEL_PATH:+/opt/frontier-agent/local-model}
+      SGLANG_SERVED_MODEL_NAME: ${SGLANG_SERVED_MODEL_NAME:-local-model}
+      SGLANG_TP_SIZE: ${SGLANG_TP_SIZE:-1}
+      SGLANG_CONTEXT_LENGTH: ${SGLANG_CONTEXT_LENGTH:-32768}
+      SGLANG_MEM_FRACTION_STATIC: ${SGLANG_MEM_FRACTION_STATIC:-0.88}
+      SGLANG_TOOL_CALL_PARSER: ${SGLANG_TOOL_CALL_PARSER:-}
+      SGLANG_REASONING_PARSER: ${SGLANG_REASONING_PARSER:-}
+      SGLANG_CHAT_TEMPLATE: ${SGLANG_CHAT_TEMPLATE:-}
+      SGLANG_DTYPE: ${SGLANG_DTYPE:-auto}
+      SGLANG_QUANTIZATION: ${SGLANG_QUANTIZATION:-}
+      SGLANG_TRUST_REMOTE_CODE: ${SGLANG_TRUST_REMOTE_CODE:-0}
+      SGLANG_EXTRA_ARGS: ${SGLANG_EXTRA_ARGS:-}
+    volumes:
+      - ./docker/sglang_entrypoint.py:/opt/frontier-agent/sglang_entrypoint.py:ro
+      - ./docker/smoke_sglang.py:/opt/frontier-agent/smoke_sglang.py:ro
+      - type: bind
+        source: ${SGLANG_LOCAL_MODEL_PATH:-./docker/empty-model}
+        target: /opt/frontier-agent/local-model
+        read_only: true
+      - huggingface-cache:/root/.cache/huggingface
+    # Loopback only. The endpoint has no authentication and the agent reaches
+    # it over the compose network, so publishing it on every interface would
+    # hand anyone who can route to this host free inference on gated weights —
+    # and these are exactly the cloud GPU boxes with a public address.
+    ports:
+      - 127.0.0.1:${SGLANG_PORT:-30000}:30000
+    shm_size: 32gb
+    ipc: host
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: ${SGLANG_GPU_COUNT:-1}
+              capabilities: [gpu]
+    healthcheck:
+      test:
+        - CMD
+        - python3
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:30000/health', timeout=5)
+      interval: 10s
+      timeout: 6s
+      retries: 360
+      start_period: 30s
+    # Local TUI inference is opt-in and should not unexpectedly consume the GPU
+    # after a host reboot. Operators can explicitly select unless-stopped.
+    restart: ${SGLANG_RESTART_POLICY:-no}
+    logging:
+      driver: local
+      options:
+        max-size: 20m
+        max-file: "3"
+
+  agent:
+    depends_on:
+      model:
+        condition: service_healthy
+    # Merges with the agent service in compose.yaml, so APODEX_IN_CONTAINER
+    # and SANDBOX_BACKEND=container carry over from there.
+    environment:
+      OPENAI_PROVIDER: local
+      OPENAI_API_KEY: EMPTY
+      OPENAI_BASE_URL: http://model:30000/v1
+      OPENAI_MODEL: ${SGLANG_SERVED_MODEL_NAME:-local-model}
+      OPENAI_CONTEXT_WINDOW: ${SGLANG_CONTEXT_LENGTH:-32768}
+      # Two invariants, both checked by the doctors and by
+      # test_deployment_config.py, so these fallbacks must satisfy them for an
+      # env file that sets only a model: input + output <= context, and input
+      # above 0.8 x OPENAI_CONTEXT_WINDOW. The latter is where tiered
+      # compaction triggers, and ContextSizeGuard is critical, so a lower
+      # budget aborts the run with budget_exhausted before compaction can ever
+      # relieve it. These match .env.sglang.example and both launcher doctors.
+      OPENAI_MAX_INPUT_TOKENS: ${SGLANG_MAX_INPUT_TOKENS:-27000}
+      OPENAI_MAX_TOKENS: ${SGLANG_MAX_OUTPUT_TOKENS:-4096}
+      SERPER_API_KEY: ${SERPER_API_KEY:-}
+      SERPER_BASE_URL: ${SERPER_BASE_URL:-https://google.serper.dev}
+      JINA_API_KEY: ${JINA_API_KEY:-}
+      JINA_BASE_URL: ${JINA_BASE_URL:-https://r.jina.ai}
+
+volumes:
+  huggingface-cache:

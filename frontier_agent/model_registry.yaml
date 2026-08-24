@@ -1,0 +1,82 @@
+# model_registry.yaml — model id → thinking_format mapping
+#
+# Bundled at ``frontier_agent/model_registry.yaml`` so ``pip install
+# frontier_agent`` ships it inside the wheel — the loader resolves the
+# path relative to this package, so don't move it back to the repo
+# root.
+#
+# Read by ``frontier_agent.core.runtime.loop.model_profile.infer_thinking_format``
+# when a workflow profile leaves ``agent.thinking_format`` unset. Edit
+# this file (not the Python source) when you need to add or correct an
+# entry for a specific deployment.
+#
+# IMPORTANT — endpoint dependency
+# ───────────────────────────────
+# ``thinking_format`` is fundamentally a property of the *endpoint*, not
+# of the model. The same Qwen3 weights return:
+#
+#   * raw ``<think>…</think>`` tags from DashScope and stock SGLang, and
+#   * a separate ``reasoning_content`` field when SGLang is started with
+#     ``--reasoning-parser qwen3``.
+#
+# This table makes a best-effort guess from ``model_id`` alone. When the
+# inference is wrong for your endpoint, override it explicitly in your
+# workflow profile (``agent.thinking_format: <value>``).
+#
+# Matching rules
+# ──────────────
+# * Patterns are Python regex, matched **case-insensitively** against the
+#   bare model id (no provider prefix needed).
+# * **First match wins** — list more specific patterns before broader ones.
+# * Anything not matched falls through to the caller-supplied default.
+#   The library default is ``tag`` because the parser no-ops cleanly when
+#   no ``<think>`` blocks are present, so it's the safest unknown-model
+#   fallback.
+# * Allowed format values: ``tag`` | ``content_block`` |
+#   ``reasoning_content`` | ``none``.
+
+thinking_formats:
+  # Anthropic Claude with extended thinking — content arrives as a list
+  # of typed blocks: ``[{type: thinking, thinking: ...}, {type: text, text: ...}]``.
+  # Source: https://docs.claude.com/en/docs/build-with-claude/extended-thinking
+  - pattern: '^claude-(opus|sonnet|haiku)-[0-9]'
+    format: content_block
+    note: Anthropic extended thinking — typed content blocks
+
+  # DeepSeek hosted endpoints (V3/V4 Pro/Flash, R1 reasoner) emit
+  # ``reasoning_content`` at the same level as ``content``. Note: the
+  # API rejects requests that include ``reasoning_content`` in prior
+  # turns — strip it from history before resending.
+  # Source: https://api-docs.deepseek.com/guides/reasoning_model
+  - pattern: '^deepseek[-/]'
+    format: reasoning_content
+    note: DeepSeek-Reasoner / V3 / V4 official API
+
+  # Doubao Seed dated checkpoints (e.g. ``doubao-seed-*-260215``) use
+  # the reasoning_content schema. The OpenRouter-style
+  # ``bytedance-seed/seed-*`` slug returns <think> tags instead — left
+  # to fall through to the ``tag`` default.
+  - pattern: '^doubao-seed-'
+    format: reasoning_content
+    note: Bytedance Doubao Seed (dated checkpoint variants)
+
+  # Stock OpenAI chat models (gpt-3.5-turbo, gpt-4*, gpt-4o*) — no
+  # separate thinking output. gpt-5 / o-series via chat-completions also
+  # don't expose reasoning to the client; their slugs vary by deployment
+  # so they're intentionally left out of this table — set explicitly in
+  # your profile if your proxy surfaces reasoning_content for them.
+  - pattern: '^gpt-(4|3\.5)'
+    format: none
+    note: OpenAI chat completions (no exposed reasoning)
+
+  # Apodex checkpoints, served on SGLang with ``--reasoning-parser qwen3``.
+  # ``tag`` is right even though the reply arrives on the typed
+  # ``reasoning_content`` channel: that format reads the typed channel first
+  # (falling back to the regex), and on the way OUT it re-inlines reasoning as
+  # ``<think>…</think>`` instead of sending a bare ``reasoning_content`` field,
+  # which is what the Qwen-family chat template reconstructs from. Listing them
+  # explicitly rather than leaning on the ``tag`` default documents that this is
+  # a decision, not an accident.
+  - pattern: '^apodex[-/]'
+    format: tag
+    note: Apodex on SGLang (typed reasoning inbound, <think> tags outbound)

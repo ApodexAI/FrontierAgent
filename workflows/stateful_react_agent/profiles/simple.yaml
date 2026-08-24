@@ -1,0 +1,42 @@
+# Deterministic single-agent baseline: keep five recent tool results and never
+# call an LLM to summarize history.
+llm:
+  model: ${OPENAI_MODEL}
+  api_key: ${OPENAI_API_KEY}
+  base_url: ${OPENAI_BASE_URL}
+  # Not 0.0 — see the note in this workflow's benchmark.yaml. At temperature 0
+  # sglang takes the argmax path and a reasoning runaway becomes a deterministic
+  # deadlock; top_p/top_k are inert until temperature leaves 0.
+  temperature: 1.0
+  top_p: 0.95
+  extra_body:
+    top_k: 20
+  max_tokens: 32768
+
+agent:
+  main_max_turns: 200
+  tool_timeout_s: 900
+  llm_timeout_s: 600
+  reasoning_only_timeout_s: 120
+  reasoning_only_max_tokens: 16384
+  logical_call_timeout_s: 900
+  thinking_in_history: true
+  # Optional PER-TURN cap on the reasoning replayed for one assistant turn; it
+  # also enables thinking history when the boolean above is omitted. An explicit
+  # thinking_in_history: false always takes precedence. This is not a budget
+  # over the whole history — total reasoning still grows with turn count, which
+  # is compaction's job to bound. Applies to the `tag` and `reasoning_content`
+  # thinking formats; native content-block reasoning (Anthropic extended
+  # thinking, OpenAI Responses) is always replayed verbatim, signatures
+  # included, because the provider validates it server-side.
+  # thinking_history_max_tokens: 8192
+  # `off` only blanks older tool-result bodies, keeping the latest five. It
+  # never summarizes user/assistant history, so very long runs can still fill
+  # the context window.
+  keep_last_k: 5
+  context_compaction: "off"
+  compaction_spill: false
+  max_input_tokens: 229376
+  agent_tools: [web_search, web_fetch, bash, download_file, grep_search, glob_search, recover_result]
+  web_search_impl: original
+  web_fetch_impl: original

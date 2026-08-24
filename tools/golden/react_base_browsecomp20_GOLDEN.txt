@@ -1,0 +1,9 @@
+frozen_at: 2026-08-03T18:16:48+08:00
+git_commit: 42648fa10e01ed60dbe47cf893ca7a75c211b828
+git_branch: feat/agent-team-port
+benchmark: browsecomp  pipeline: react_base  profile: keep5
+limit: 20  shuffle: off
+agent_model: apodex-1.0
+agent_endpoint: #fac492013eb3
+judge_endpoint: #3ffec9e7562d
+judge_session: judge-golden-1785749719

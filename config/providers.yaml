@@ -1,0 +1,116 @@
+# LLM Provider Registry
+#
+# Each entry is one logical provider with its credentials and base URL.
+# Profiles reference a provider by name via ``llm.provider`` — the loader
+# injects ``api_key`` / ``base_url`` and stamps the provider label on every LLM
+# response, so usage attribution reports which vendor actually served a call.
+#
+# ``type`` decides which client is used:
+#   - openai        — the real OpenAI API (chat.completions / responses)
+#   - openai_compat — any vendor speaking the OpenAI wire format (vLLM, SGLang,
+#                     DashScope, OpenRouter, …)
+#   - anthropic     — Anthropic Messages API
+#   - bedrock       — AWS Bedrock runtime for Claude. Same Messages wire body,
+#                     but the model id lives in the URL
+#                     (``/model/{id}/invoke``) and auth is a Bedrock API key
+#                     (``Authorization: Bearer``), not IAM SigV4.
+#
+# Env-var expansion supports ``${VAR}`` and ``${VAR:-default}`` (flat, no
+# nesting — keep ``.env`` flat too). Every entry below resolves entirely from
+# the environment: nothing here is a credential.
+#
+# Optional ``extra_headers:`` (a string→string map) is merged into the client's
+# ``default_headers`` at construction, so the header rides EVERY request to
+# that provider. Inline profile headers win per key.
+#
+# Add your own entry rather than editing one of these; the names below are
+# referenced by the shipped profiles.
+
+# ── YAML anchors (ignored by the loader — it reads only ``providers:`` and
+# ``model_chains:``) ──────────────────────────────────────────────────────
+_anchors:
+  # Disable DashScope's server-side content moderation. Without it,
+  # DashScope-compatible endpoints intermittently reject benign scraped web
+  # content with ``400 code=data_inspection_failed`` — which fails a
+  # double-digit fraction of summary calls on a scraping-heavy run. Sent as an
+  # opaque header value (a JSON string DashScope parses server-side); harmless
+  # on non-DashScope endpoints, which ignore unknown headers.
+  dashscope_no_inspection: &dashscope_no_inspection
+    X-DashScope-DataInspection: '{"input": "disable", "output": "disable"}'
+
+providers:
+  # Real OpenAI API (Responses + chat.completions). The default for the
+  # shipped profiles: point OPENAI_BASE_URL at any OpenAI-compatible gateway
+  # to redirect them without touching a profile.
+  openai:
+    type: openai
+    api_key: ${OPENAI_API_KEY}
+    base_url: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+
+  anthropic:
+    type: anthropic
+    api_key: ${ANTHROPIC_API_KEY}
+    base_url: ${ANTHROPIC_BASE_URL:-https://api.anthropic.com}
+
+  # AWS Bedrock for Claude. Uses a Bedrock API key, not IAM SigV4; model ids
+  # are inference profiles (``global.anthropic.claude-...``).
+  bedrock:
+    type: bedrock
+    api_key: ${BEDROCK_API_KEY}
+    base_url: ${BEDROCK_BASE_URL:-https://bedrock-runtime.us-east-1.amazonaws.com}
+
+  deepseek:
+    type: openai_compat
+    api_key: ${DEEPSEEK_API_KEY}
+    base_url: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
+
+  # Alibaba DashScope's OpenAI-compatible mode (qwen models).
+  dashscope:
+    type: openai_compat
+    api_key: ${DASHSCOPE_API_KEY}
+    base_url: ${DASHSCOPE_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
+    extra_headers: *dashscope_no_inspection
+
+  # OpenRouter exposes two surfaces. The OpenAI-compatible one:
+  openrouter:
+    type: openai_compat
+    api_key: ${OPENROUTER_API_KEY}
+    base_url: ${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
+  # …and a native Anthropic skin, needed when a chain leg wants the Messages
+  # API wire format (tools + thinking) rather than chat.completions.
+  openrouter_anthropic:
+    type: anthropic
+    api_key: ${OPENROUTER_API_KEY}
+    base_url: https://openrouter.ai/api
+
+  # A model you serve yourself (SGLang / vLLM / Ollama). Most self-hosted
+  # stacks accept any non-empty key, hence the placeholder default.
+  local:
+    type: openai_compat
+    api_key: ${LOCAL_API_KEY:-EMPTY}
+    base_url: ${LOCAL_BASE_URL:-http://localhost:8000/v1}
+
+# Canonical model name → ordered provider legs. The chain advances to the next
+# leg when a leg fails in a way retrying the same one cannot fix (model not
+# hosted, auth rejected, repeated stream interrupts). ``model:`` overrides the
+# id sent for that leg; omit it to send the canonical name.
+#
+# These are examples, and only take effect for a profile that names the
+# canonical model. Order matters: put the endpoint that streams your longest
+# turn reliably first. An aggregator can be perfectly fine for isolated calls
+# yet buffer a long tool-using turn until the stream times out — which looks
+# like a model failure and is actually a routing choice.
+model_chains:
+  claude-sonnet-4-6:
+    - provider: bedrock
+      model: global.anthropic.claude-sonnet-4-6
+    - provider: anthropic
+    - provider: openrouter_anthropic
+      model: anthropic/claude-sonnet-4.6
+
+  claude-opus-5:
+    - provider: bedrock
+      model: global.anthropic.claude-opus-5
+    - provider: anthropic
+    - provider: openrouter_anthropic
+      model: anthropic/claude-opus-5

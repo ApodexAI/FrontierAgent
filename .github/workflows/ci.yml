@@ -1,0 +1,60 @@
+name: CI
+on:
+  push:
+    branches: [main, "release/*"]
+  pull_request:
+    branches: [main, "release/*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-and-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          python-version: "3.12"
+      - name: Install local sandbox runtime
+        run: sudo apt-get update && sudo apt-get install -y bubblewrap
+      - name: Install framework dependencies
+        run: uv sync --locked --extra dev --extra sandbox --extra document-readers --extra hf-space
+      - name: Ruff lint
+        run: uv run ruff check frontier_agent/ apodex/ benchmarks/ workflows/ plugins/ deploy/ tools/ scripts/
+      - name: Validate local NVIDIA deployment files
+        env:
+          APODEX_DOCKER_SUBNET: 172.29.250.0/24
+        run: |
+          bash -n docker/run.sh docker/run-sglang.sh docker/sglang-doctor.sh docker/entrypoint.sh docker/gpu-entrypoint.sh
+          python -m py_compile docker/sglang_entrypoint.py docker/smoke_sglang.py scripts/run-sglang-native.py
+          docker compose --env-file .env.sglang.example \
+            -f compose.yaml -f compose.sglang.yaml config --quiet
+          docker compose --env-file config/sglang/35b-5090.env.example \
+            -f compose.yaml -f compose.sglang.yaml -f compose.network.yaml \
+            -f compose.dev.yaml config --quiet
+      - name: Framework import smoke (eval layer blocked)
+        run: uv run python tools/import_smoke.py --stage 1
+      - name: Install eval dependencies
+        run: uv sync --locked --extra dev --extra sandbox --extra document-readers --extra hf-space --extra eval
+      - name: Eval import smoke and symbol closure
+        run: |
+          uv run python tools/import_smoke.py --stage 2
+          uv run python tools/check_symbols.py
+          uv run python tools/check_lazy_exports.py
+      # Runs here rather than beside the ruff step because benchmarks/ imports
+      # harbor and datasets, which only exist once the eval extras are in.
+      # Config (including which trees are enforced) is pyrightconfig.json, which
+      # VS Code's Pylance reads too — so a contributor's editor shows exactly
+      # what this step enforces.
+      - name: Pyright type check
+        run: uv run pyright
+      - name: Unit and exec-bundle tests
+        env:
+          SANDBOX_BACKEND: bwrap
+        run: uv run pytest -q

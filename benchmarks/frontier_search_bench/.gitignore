@@ -1,0 +1,36 @@
+# Secrets
+*secret*
+.env
+.env.*
+!.env.template
+!.env.example
+
+# Eval run artifacts (regenerated locally; not source)
+results/
+logs/
+eval/verifiable/scorers/query_*/auto_scores/
+eval/verifiable/query_*/auto_scores/
+eval/verifiable/all_results_*.log
+
+# Caches and editor / OS noise
+__pycache__/
+*.pyc
+*.pyo
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+.venv/
+venv/
+.DS_Store
+.idea/
+.vscode/
+
+# Claude Code local settings
+.claude/settings.local.json
+
+# Backups
+*.bak
+*.bak.*
+
+# Misc accidental files
+~

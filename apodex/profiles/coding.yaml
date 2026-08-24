@@ -1,0 +1,57 @@
+# Built-in "coding" profile for apodex.
+#
+# Secrets stay in .env. Here `llm.provider: openai` pulls api_key + base_url
+# from config/providers.yaml (which reads ${OPENAI_API_KEY} / ${OPENAI_BASE_URL}).
+# To use a different backend, either switch `provider:` to another entry in
+# config/providers.yaml (apodex, anthropic, aliyun, …) or drop `provider:` and
+# set explicit `api_key: ${MY_KEY}` / `base_url: ${MY_URL}` here.
+# Copy this file to ~/.apodex/profiles/coding.yaml to override it.
+name: coding
+description: Edit code, run tests, and fix bugs in the local repository.
+
+llm:
+  provider: openai
+  # First entry is the default; switch at runtime with `/model <name|number>`.
+  # Edit this list to whatever your endpoint serves.
+  models:
+    - ${OPENAI_MODEL:-gpt-4o}
+    - gpt-5-mini
+    - gpt-4o-mini
+  temperature: 0.0
+  # Left at 0 deliberately, unlike the workflow profiles under `workflows/`.
+  # Those serve a self-hosted Apodex checkpoint on SGLang, where temperature 0
+  # takes the argmax path and a reasoning runaway becomes a deterministic
+  # deadlock. This profile defaults to `gpt-4o` on `provider: openai`, where that
+  # mechanism does not apply.
+  #
+  # For a self-hosted vLLM / SGLang endpoint, add the model's own sampling values:
+  #   temperature: 1.0
+  #   top_p: 0.95
+  #   extra_body:
+  #     top_k: 20
+  # Both ride `extra_body` (neither is a Chat-Completions field). Do NOT set them
+  # while pointed at an OpenAI-family endpoint: those reject the fields outright —
+  # `tools/preflight.py` detects the resulting error and says so.
+  max_tokens: 8192
+  context_window: ${OPENAI_CONTEXT_WINDOW:-128000}
+
+agent:
+  base_prompt: coding        # coding | research (which prompts.py builder)
+  system_prompt: ""          # non-empty → full override (skips the builder)
+  max_turns: 50
+
+tools:
+  - bash
+  - read_file
+  - grep_search
+  - glob_search
+  - file_editor_view
+  - file_editor_create
+  - file_editor_str_replace
+  - write_file
+  - delete_file
+  - todo_write
+  - exit_plan_mode
+
+# Skill ids from plugins/skills/. [] = none · ["*"] = all · [id, ...] = allowlist.
+skills: []

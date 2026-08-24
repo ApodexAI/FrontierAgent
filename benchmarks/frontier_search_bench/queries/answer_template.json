@@ -1,0 +1,248 @@
+[
+  {
+    "id": 1,
+    "query": "I want to invest in Singapore real estate. Please help me find, among the condominiums that obtained TOP (Temporary Occupation Permit) in 2019, the three projects with the highest resale return rate in 2025, and give the specific return rate for each.",
+    "report_content": "",
+    "response": ""
+  },
+  {
+    "id": 2,
+    "query": "For each State-level New Area (国家级新区) in China approved between January 1, 2005 and January 1, 2026: in every year since its approval, what is the difference between the New Area's GDP growth rate and China's national GDP growth rate for that same year? Among these New Areas, which ones have seen this difference shift from positive to negative at some point? For each such case, in what year did the difference first turn negative?",
+    "report_content": "",
+    "response": ""
+  },
+  {
+    "id": 3,
+    "query": "As of January 1, 2026, how many flight tests has SpaceX's Starship completed in total? Please list them one by one, with the key progress and the failure points of each test.",
+    "report_content": "",
+    "response": ""
+  },
+  {
+    "id": 4,
+    "query": "From 1945 to 2026, how many nuclear accidents at INES level 4 or above have occurred in total at nuclear power plants worldwide? Please list each accident one by one, including the time, the location, the reactor model, the accident level, the direct cause, and the specific changes to that country's nuclear power policy after the accident (e.g., new legislation, plant shutdowns, freezes on new construction, etc.). For each accident, also compare the change in that country's share of electricity generation from nuclear power between the 5 years before and the 5 years after the accident.",
+    "report_content": "",
+    "response": ""
+  },
+  {
+    "id": 5,
+    "query": "Help me look up the science-track minimum admission cutoff scores (toudang xian / 投档线) of 985 universities for computer-science-related majors in Henan Province from 2020 to 2025, and summarize them into a table.",
+    "report_content": "",
+    "response": ""
+  },
+  {
+    "id": 6,
+    "query": "As of January 1, 2026, which Nobel laureates had their prize-winning paper initially rejected by a journal?",
+    "report_content": "",
+    "response": ""
+  },
+  {
+    "id": 7,
+    "query": "As of January 1, 2026, among all countries that have ever participated in the International Mathematical Olympiad (IMO), which country has the most Fields Medalists among those who once represented it at the IMO, and how many such people are there?",
+    "report_content": "",
+    "response": ""
+  },
+  {
+    "id": 8,
+    "query": "During LeBron James's time with the Cleveland Cavaliers, look at all the games he played against Kobe Bryant. Identify every game in which Kobe scored his second-highest single-game total in that head-to-head series (include all games if there are ties), and for each of those games find the highest-scoring player on LeBron's team (there may be more than one answer).",
+    "report_content": "",
+    "response": ""
+  },
+  {
+    "id": 9,
+    "query": "As of the 2024 Paris Olympics (inclusive), throughout Olympic history, which Chinese athletes (both currently competing and retired) have won 3 or more Olympic medals but have never won a gold medal?",
+    "report_content": "",
+    "response": ""
+  },
+  {
+    "id": 10,
+    "query": "Among Chinese-language films released between 2016 and 2025, which films simultaneously meet all three of the following conditions: (1) Douban rating ≥ 8.0; (2) Mainland China box office < 100 million RMB; (3) received a Best Feature Film nomination at the Golden Rooster Awards (nomination only, not a win) OR a Best Film nomination at the Hong Kong Film Awards (nomination only, not a win). Please list these films and, for each, give the director and the year of release.",
+    "report_content": "",
+    "response": ""
+  },
+  {
+    "id": 11,
+    "query": "As of January 1, 2026, help me find papers that were submitted to one of the top three conferences (ICLR, NeurIPS, ICML) but were rejected, then never accepted at those venues afterward, yet still went on to receive more than 10,000 citations.",
+    "report_content": "",
+    "response": ""
+  },
+  {
+    "id": 12,
+    "query": "Among writers who have won the Nobel Prize in Literature, which ones were formally expelled or exiled by the government of their own country?",
+    "report_content": "",
+    "response": ""
+  },
+  {
+    "id": 13,
+    "query": "Between January 1, 2016 and January 1, 2026, identify technology stocks whose share price fell by around 5% following each earnings report. Among the stocks in the upstream and downstream industries of their respective supply chains, which stock had the largest single-day decline?",
+    "report_content": "",
+    "response": ""
+  },
+  {
+    "id": 14,
+    "query": "Historically, which heads of state have simultaneously held nationality or citizenship of two or more countries while in office?",
+    "report_content": "",
+    "response": ""
+  },
+  {
+    "id": 15,
+    "query": "As of January 1, 2026, which cattery has bred Neva Masquerade cats that have won the WCF Best Cat title the most times?",
+    "report_content": "",
+    "response": ""
+  },
+  {
+    "id": 16,
+    "query": "Find all winners of the Nobel Prize in Physics, in Chemistry, and in Physiology or Medicine from 2000 to 2025 (inclusive). For each winner, identify the core paper (or the earliest public publication of the core discovery) that the prize was awarded for, and compute the gap in years between that publication and the prize. For each of the three disciplines separately, report the median, the mean, and the trend (whether the wait is shortening), and list the 3 cases with the longest wait and the 3 cases with the shortest wait.",
+    "report_content": "",
+    "response": ""
+  },
+  {
+    "id": 17,
+    "query": "Looking back over AI paper releases and the corresponding company stock prices between January 1, 2025 and January 1, 2026: which paper releases triggered a price move of more than 5% in the related company's stock price within 48 hours of publication? In which AI subfields is this \"paper → stock price\" transmission effect most pronounced?",
+    "report_content": "",
+    "response": ""
+  },
+  {
+    "id": 18,
+    "query": "There is an architect who studied architecture at a famous American institute of technology, and who later became lifelong friends with an American inventor known for a certain kind of spherical architectural structure; the two of them also organized a series of intellectual exchanges on an island. This architect designed a skyscraper whose foundation was laid using giant circular caissons. What is the current name of that skyscraper?",
+    "report_content": "",
+    "response": ""
+  },
+  {
+    "id": 19,
+    "query": "In 1935, the Japanese architect Kunio Maekawa, while working at Le Corbusier's Paris atelier, took part in an unbuilt competition project. Which building, in which city, was this competition project designed for? And what specific part of the project was Maekawa responsible for?",
+    "report_content": "",
+    "response": ""
+  },
+  {
+    "id": 20,
+    "query": "I've had an earworm for a few days, but I can't remember the exact name of the song. I can replay it on the guitar with a capo on the 3rd fret, using a repeating chord progression of C–G–Am–F in the intro and verses. The tune shifts to a slightly higher arpeggio pattern in the bridge. The overall tone is very melancholic and reflective. I also remember the singer is a man in his 30s or 40s (can't be sure). Can you help me identify (or narrow down) the song?",
+    "report_content": "",
+    "response": ""
+  },
+  {
+    "id": 21,
+    "query": "As of January 1, 2026, there is a case where someone accepted a very important world-class award on behalf of the actual recipient. In which year was that award ceremony held? I remember the person who accepted the award has the letters \"do\" in their name, and the actual recipient (the person being honored) has the letters \"in\" in their name.",
+    "report_content": "",
+    "response": ""
+  },
+  {
+    "id": 22,
+    "query": "A certain country's drug regulatory agency has a special \"fast track\" program. The first drug ever to be approved for market through this fast track has the letters \"zy\" in its brand name. I remember that the name of the company that submitted the application has \"tech\" in it. What is the official approval number of this drug? And on exactly which date was it approved?",
+    "report_content": "",
+    "response": ""
+  },
+  {
+    "id": 23,
+    "query": "In 2025, slime encountered a major Megatron-related issue that affected MoE training — what was it?",
+    "report_content": "",
+    "response": ""
+  },
+  {
+    "id": 24,
+    "query": "\"Has the female journalist who appears in 《等等》, a documentary about the gaokao-focused educational ecosystem of county-level high schools in mainland China, taken part in filming any other documentaries?\"",
+    "report_content": "",
+    "response": ""
+  },
+  {
+    "id": 25,
+    "query": "For one Starbucks Grande latte, going from the coffee seed all the way to being handed to the consumer, what share of the profit does each link of the full supply chain — cultivation, picking, processing, transportation, roasting, packaging, store operations, and taxes/fees — take? How much money does an Ethiopian coffee farmer actually receive per cup?",
+    "report_content": "",
+    "response": ""
+  },
+  {
+    "id": 26,
+    "query": "Please identify a stock in China's A-share market based on the following clues: around December 2025 it hit a local low of roughly 5.50, then rallied sharply in early January 2026 and reached a local high of about 9.45 within a short period; afterward the price pulled back but did not fully give up the gains, and continued to oscillate in the 7-yuan-plus range. Public trading data also show that on one particularly active trading session the volume was about 1.8478 million board lots (i.e., ~184.78 million shares) and the turnover rate was around 10%. Which stock is this most likely to be? Please provide a complete chain of evidence.",
+    "report_content": "",
+    "response": ""
+  },
+  {
+    "id": 27,
+    "query": "Imagine a paper strip that is 2 cm wide and 30 cm long. You twist one end by 540° (i.e., three half-turns) and then glue the two ends together, forming a higher-order Möbius strip. Next, using scissors, you cut continuously along a path exactly 0.5 cm from the edge of the strip, all the way around the entire strip. After finishing the cut along a path exactly 0.5 cm from one edge, how many separate paper strips do you end up with? What are the length and width of each resulting strip? More importantly, among the resulting strips, take the widest one — topologically, how many half-twists does it contain? Does it form an interlocking link with any of the other strips?",
+    "report_content": "",
+    "response": ""
+  },
+  {
+    "id": 28,
+    "query": "As of March 2026, how many confirmed exoplanets are listed in the NASA Exoplanet Archive? Among them, which ones have shown water signatures—confirmed or tentative—in their atmospheres from JWST observations? Of these, when was the most recent one announced, and how far is it from Earth?",
+    "report_content": "",
+    "response": ""
+  },
+  {
+    "id": 29,
+    "query": "In the evolution of the FlashAttention series from v1 to v3, there is a specific CUDA kernel optimization trick that originally came from a paper outside the attention domain. Please identify the title of that paper, the specific name of the technique, and the version of FlashAttention and the specific kernel file in which this trick was first applied.",
+    "report_content": "",
+    "response": ""
+  },
+  {
+    "id": 30,
+    "query": "Build an academic genealogy (advisor-advisee tree) with Alan Yuille as the leaf node, tracing his lineage upward all the way back to the 18th century.",
+    "report_content": "",
+    "response": ""
+  },
+  {
+    "id": 31,
+    "query": "Imagine in your mind a perfect cube of pure wax with a 10-cm edge, sitting flat on a horizontal table. Step 1: Using a drill bit of 2 cm diameter, drill straight from the cube's \"left-front-top\" vertex toward the \"right-rear-bottom\" vertex, going all the way through, creating a cylindrical diagonal tunnel. Step 2: Keeping the wax cube stationary on the horizontal table, pour molten lead into this through-tunnel. Because there is an opening at the bottom, you first seal the bottom opening with a thin membrane. Then pour molten lead in until the volume of the lead exactly fills 50% of the tunnel's total volume. Wait for the lead to cool and solidify completely. Step 3: Move the wax block (with the lead core inside) as a whole onto a perfectly smooth ramp inclined at 30°. Step 4: In an instant, raise the ambient temperature above the melting point of wax, so the cube of wax instantaneously vaporizes and disappears completely, leaving only the solidified lead piece, which under gravity falls directly onto the 30° ramp. Questions: What is the precise three-dimensional geometric shape of this remaining lead piece? At the very instant the wax disappears and the lead piece touches the 30° ramp, what kind of physical motion will it undergo?",
+    "report_content": "",
+    "response": ""
+  },
+  {
+    "id": 32,
+    "query": "Take a look at the data in the DOCBENCH paper (Zou et al., 2025) and help me analyze: what is the average length of the ground-truth answers in their benchmark?",
+    "report_content": "",
+    "response": ""
+  },
+  {
+    "id": 33,
+    "query": "If I start from Denver, Colorado in the United States and move continuously due south until I reach the South Pole, please list, in order, the names of every county or equivalent administrative division I will pass through.",
+    "report_content": "",
+    "response": ""
+  },
+  {
+    "id": 34,
+    "query": "Help me find which Peninsula Hotels have a To Summer store within 1 km.",
+    "report_content": "",
+    "response": ""
+  },
+  {
+    "id": 35,
+    "query": "Please research, as of January 1, 2026: for each country in which Haidilao operates, what is the maximum distance between any two Haidilao stores in that country, and which two stores define that distance?",
+    "report_content": "",
+    "response": ""
+  },
+  {
+    "id": 36,
+    "query": "I was playing GeoGuessr (NMPZ mode) with my friends and was puzzled by a photo featuring a narrow two-lane asphalt road in good condition with no major damage, marked by a single white dashed center line, which gently curves and rises slightly in the distance alongside a wooden utility/electricity pole on the right side with overhead wires running across. On both sides, there is dense, lush green vegetation with mixed green tones—predominantly broadleaf trees and shrubs that also appear dry and scrubby—where the trees on the left are particularly dense, overgrown, and almost encroaching on the road. Partially obscured by this vegetation in the mid-distance on the left side is a small white/light-coloured building that appears to be a modest, single-storey residential structure. Running along the right side of the road is a low stone/concrete retaining wall covered in informal, urban-style colorful graffiti in tag-style lettering with blue and yellow tones, located right next to a red, black, and white cartoon depiction of Mickey Mouse and Minnie Mouse in classic Disney style. The background reveals rolling green hills, indicating a terrain that is hilly rather than mountainous; based on all these details, can you give me the latitude and longitude coordinates for the answer?",
+    "report_content": "",
+    "response": ""
+  },
+  {
+    "id": 37,
+    "query": "Obtain the Amazon rainforest coverage data for 2015 and for 2024, estimate the net reduction in rainforest area over this ten-year span (give a positive number, in square kilometers), and list the three regions with the most severe forest loss, indicating the country each is in and their approximate geographic coordinates.",
+    "report_content": "",
+    "response": ""
+  },
+  {
+    "id": 38,
+    "query": "A traveling salesman starts from Beijing and must visit the following 7 Chinese cities in some order — Shanghai, Guangzhou, Chengdu, Xi'an, Harbin, Urumqi, and Lhasa — before returning to Beijing. Using the actual flight distances between these cities, what is the shortest total route and what is its total distance in kilometers?",
+    "report_content": "",
+    "response": ""
+  },
+  {
+    "id": 39,
+    "query": "Obtain the 2024 annual mean temperature and annual precipitation for the capital city of every country in the world. Identify the \"most climatically livable\" capitals where the annual mean temperature is within 15°C ± 2°C and the annual precipitation is between 800 and 1200 mm. Locate them on a map, and compute their average distance from the equator.",
+    "report_content": "",
+    "response": ""
+  },
+  {
+    "id": 40,
+    "query": "Driving along U.S. Route 66 from Chicago to Los Angeles, what is the highest elevation point along the route and where is it located? What is the lowest elevation point and where is it located? And what is the elevation at each state border crossing along the way?",
+    "report_content": "",
+    "response": ""
+  },
+  {
+    "id": 41,
+    "query": "You are standing on the observation deck of the Empire State Building, facing due north (toward Central Park). A friend on the phone gives you the following instructions: 1. Turn 90° to the right. 2. Turn another 45° to the right. 3. Turn 200° to the left. 4. Turn another 15° to the right. Question A: Which compass direction are you now facing? Question B: Looking into the distance, you can see a body of water — what body of water is it?",
+    "report_content": "",
+    "response": ""
+  }
+]

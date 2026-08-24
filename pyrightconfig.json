@@ -1,0 +1,57 @@
+{
+  // Checked in deliberately: VS Code's Pylance reads this file automatically and
+  // its "typeCheckingMode" overrides the per-user python.analysis setting, so the
+  // editor's red squiggles and CI's `uv run pyright` enforce exactly the same
+  // thing for everyone.
+  "include": [
+    "frontier_agent",
+    "apodex",
+    "workflows",
+    "plugins",
+    "benchmarks",
+    "deploy",
+    "tools",
+    "scripts"
+  ],
+
+  "exclude": ["**/.venv", "**/node_modules", "**/__pycache__", "**/.*_cache"],
+
+  // "ignore" rather than "exclude": excluded files are dropped from the
+  // workspace pass but Pylance still analyses and squiggles them once opened,
+  // whereas ignored paths stay quiet in the editor too.
+  "ignore": [
+    // Tests. Deferred, not disowned: 62% / 46% annotated, near-zero payoff
+    // relative to production code. Revisit once production is strict.
+    "tests",
+    "apodex/tests",
+
+    // Generated-shaped per-query scorer trees.
+    "benchmarks/frontier_search_bench/eval/verifiable/scorers/query_*",
+
+    // NOT type-checkable, by design — these are source *fragments*, not
+    // modules. _create_file.py and _doc_reader.py concatenate them and exec the
+    // result, so shared helpers (_ensure, _res, _trace) are defined in the
+    // _core fragment and only resolve after concatenation. Each file already
+    // carries `# ruff: noqa: F821` for the same reason. Checking them
+    // standalone yields 168 unavoidable false positives.
+    "plugins/tools/_reader_core.py",
+    "plugins/tools/_reader_docx.py",
+    "plugins/tools/_reader_pdf.py",
+    "plugins/tools/_reader_pptx.py",
+    "plugins/tools/_reader_xlsx.py",
+    "plugins/tools/_writer_core.py",
+    "plugins/tools/_writer_docx.py",
+    "plugins/tools/_writer_pptx.py",
+    "plugins/tools/_writer_text.py",
+    "plugins/tools/_writer_xlsx.py"
+  ],
+
+  // Resolve the same interpreter Pylance picks up, so third-party imports
+  // resolve identically in the editor and on the command line.
+  "venvPath": ".",
+  "venv": ".venv",
+  "pythonVersion": "3.12",
+  "pythonPlatform": "All",
+
+  "typeCheckingMode": "standard"
+}

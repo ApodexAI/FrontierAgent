@@ -1,0 +1,81 @@
+# TUI-native Stateful ReAct profile. Shipped inside the package so the TUI
+# never depends on a neighbouring checkout at runtime.
+llm:
+  # OpenAI-compatible endpoint. `${NAME:-default}` uses the environment value or
+  # the fallback after `:-` when the variable is unset.
+  provider: ${OPENAI_PROVIDER:-openai}
+  model: ${OPENAI_MODEL}
+  base_url: ${OPENAI_BASE_URL}
+  api_key: ${OPENAI_API_KEY}
+  # These chat-template fields enable and preserve Qwen-style thinking on
+  # compatible endpoints such as SGLang.
+  # Sampling is the model's generation_config.json triple. temperature must stay
+  # off 0: at 0 sglang takes the argmax path, top_p/top_k stop applying, and a
+  # reasoning runaway becomes a deterministic deadlock. See
+  # workflows/agent_team/profiles/benchmark.yaml for the measurement.
+  temperature: 1.0
+  top_p: 0.95
+  max_tokens: ${OPENAI_MAX_TOKENS:-32768}
+  extra_body:
+    top_k: 20
+    chat_template_kwargs: {enable_thinking: true, preserve_thinking: true}
+agent:
+  # Optional final report pass; false returns the ReAct agent's answer directly.
+  reporter: ${REPORTER:-false}
+  # Turn limit, per-call timeouts, and research/finalization budgets in seconds.
+  # Raise for long local runs; tiered compaction below bounds context.
+  main_max_turns: ${MAIN_MAX_TURNS:-600}
+  tool_timeout_s: 1800
+  llm_timeout_s: 600
+  research_wall_time_s: ${RESEARCH_WALL_TIME:-9000}
+  # Reasoning-runaway guardrails. Abort a streamed reply that is still only
+  # reasoning after 120s or ~16K reasoning tokens, and bound the whole logical
+  # call (admission wait + attempts + backoff) at 900s. Setting either
+  # reasoning_only key puts the loop on the streaming request path, which is
+  # where the watchdog lives; OpenAI-compatible endpoints only.
+  # The token cap is load-invariant; the timeout is NOT — it is wall clock, so
+  # its token-equivalent shrinks as endpoint concurrency rises (measured
+  # single-stream throughput fell from ~204 tok/s at concurrency 1 to ~132 at
+  # 120). Raise concurrency and the two keys stop meaning the same thing; the
+  # token cap is the one to trust.
+  reasoning_only_timeout_s: 120
+  reasoning_only_max_tokens: 16384
+  logical_call_timeout_s: 900
+  wall_deadline_reserve_s: ${REPORT_WALL_TIME:-1800}
+  reporter_timeout_s: 600
+  reporter_phase_timeout_s: 1800
+  # ``tag`` names the OUTBOUND wire shape, not the inbound parse — the two
+  # differ and the name only describes one of them:
+  #   inbound  — the typed ``reasoning_content`` channel is preferred whenever
+  #              the endpoint separates it (SGLang ``--reasoning-parser qwen3``
+  #              does), and the ``<think>…</think>`` regex is only the fallback
+  #              for stock SGLang / DashScope, which inline the tags.
+  #   outbound — reasoning is re-inlined as ``<think>…</think>`` inside
+  #              ``content``, and NO bare ``reasoning_content`` field is sent.
+  # That second half is why this must stay ``tag`` for a self-served Qwen-family
+  # checkpoint even though the reply arrives on the typed channel: the chat
+  # template reconstructs thinking from the tags and does not read an inbound
+  # ``reasoning_content`` field, so ``thinking_format: reasoning_content`` would
+  # put an unconsumed field on the wire and silently stop reasoning from
+  # round-tripping. See ``core/messages.assistant_msg_with_reasoning``.
+  thinking_format: tag
+  thinking_in_history: true
+  # Compact near 80% of max_len, preserving five recent results and turns.
+  context_compaction: tiered
+  # Ephemeral recovery cache, isolated to the current session.
+  compaction_spill: ${COMPACTION_SPILL:-true}
+  max_len: ${OPENAI_CONTEXT_WINDOW:-262144}
+  # Hard guard; leave output headroom and let tiered compaction trigger first.
+  max_input_tokens: ${OPENAI_MAX_INPUT_TOKENS:-229376}
+  tier1_keep_tool_result: 5
+  keep_recent_turns: 5
+  # Expose add_task/update_task and maintain their state during the run.
+  task_board: true
+  # Explicit tool allowlist; aligned web tools use the current normalized schema.
+  agent_tools: [web_search, web_fetch, bash, grep_search, glob_search, add_task, update_task, read_file, create_file, recover_result]
+  web_search_impl: aligned
+  web_fetch_impl: aligned
+  # Warn/escalate when one host repeatedly fails within this many network turns.
+  stuck_target_hint_after: 6
+  stuck_target_escalate_after: 10
+  stuck_target_window: 20

@@ -1,0 +1,10 @@
+services:
+  agent:
+    build:
+      context: .
+    pull_policy: build
+
+  eval:
+    build:
+      context: .
+    pull_policy: build

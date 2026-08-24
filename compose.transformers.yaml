@@ -1,0 +1,65 @@
+services:
+  model:
+    build:
+      context: .
+      dockerfile: docker/transformers.Dockerfile
+      args:
+        PYTORCH_IMAGE: ${TRANSFORMERS_PYTORCH_IMAGE:-pytorch/pytorch:2.11.0-cuda12.8-cudnn9-runtime}
+    image: ${TRANSFORMERS_IMAGE:-frontier-agent-transformers:local}
+    command:
+      - ${TRANSFORMERS_MODEL_ID:-apodex/Apodex-1.0-0.8B-SFT}
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --model-timeout
+      - "-1"
+    environment:
+      HF_TOKEN: ${HF_TOKEN:-}
+      HUGGING_FACE_HUB_TOKEN: ${HF_TOKEN:-}
+      HF_HOME: /root/.cache/huggingface
+    volumes:
+      - huggingface-cache:/root/.cache/huggingface
+    ports:
+      - 127.0.0.1:${TRANSFORMERS_PORT:-8000}:8000
+    shm_size: 16gb
+    ipc: host
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/v1/models', timeout=5)
+      interval: 10s
+      timeout: 6s
+      retries: 360
+      start_period: 30s
+    restart: unless-stopped
+
+  agent:
+    depends_on:
+      model:
+        condition: service_healthy
+    environment:
+      APODEX_LOCAL_RUNTIME: transformers
+      OPENAI_PROVIDER: local
+      OPENAI_API_KEY: EMPTY
+      OPENAI_BASE_URL: http://model:8000/v1
+      OPENAI_MODEL: ${TRANSFORMERS_MODEL_ID:-apodex/Apodex-1.0-0.8B-SFT}
+      OPENAI_CONTEXT_WINDOW: ${TRANSFORMERS_CONTEXT_LENGTH:-32768}
+      OPENAI_MAX_INPUT_TOKENS: ${TRANSFORMERS_MAX_INPUT_TOKENS:-28672}
+      OPENAI_MAX_TOKENS: ${TRANSFORMERS_MAX_OUTPUT_TOKENS:-4096}
+      SERPER_API_KEY: ${SERPER_API_KEY:-}
+      SERPER_BASE_URL: ${SERPER_BASE_URL:-https://google.serper.dev}
+      JINA_API_KEY: ${JINA_API_KEY:-}
+      JINA_BASE_URL: ${JINA_BASE_URL:-https://r.jina.ai}
+
+volumes:
+  huggingface-cache:
