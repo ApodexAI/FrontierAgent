@@ -7,9 +7,9 @@ license = { file = "LICENSE" }
 requires-python = ">=3.12"
 dependencies = [
     "pydantic>=2.0",
-    "pydantic-settings>=2.0",
+    "pydantic-settings>=2.14.2",
     "openai>=1.50",
-    "anthropic>=0.34",
+    "anthropic>=0.87.0",
     "httpx>=0.27",
     "trafilatura>=1.12",
     "python-dotenv>=1.0",
@@ -19,7 +19,7 @@ dependencies = [
     "tiktoken>=0.12.0",
     "pyyaml>=6.0",
     "tenacity>=9.1.4",
-    "Pillow>=10.0",
+    "Pillow>=12.3.0",
     # create_file promises Office authoring in every runtime. Keep its writers
     # deterministic instead of relying on an in-session pip install.
     "openpyxl>=3.1",
@@ -31,7 +31,7 @@ dependencies = [
 document-readers = [
     "python-docx>=1.1",
     "python-pptx>=0.6.23",
-    "pypdf>=4.0",
+    "pypdf>=6.15.0",
 ]
 plugins = [
     "tavily-python>=0.5.0",
@@ -52,11 +52,11 @@ eval = [
     "openpyxl>=3.1",
     "python-docx>=1.1",
     "python-pptx>=0.6.23",
-    "pypdf>=4.0",
+    "pypdf>=6.15.0",
 ]
 dev = [
     "openpyxl>=3.1",
-    "pypdf>=4.0",
+    "pypdf>=6.15.0",
     "python-docx>=1.1",
     "python-pptx>=0.6.23",
     "pytest>=8.3",
@@ -101,6 +101,25 @@ packages = ["frontier_agent", "apodex", "plugins", "workflows", "benchmarks"]
 # that package is enforced — see pyrightconfig.json for what is currently gated.
 [tool.hatch.build.targets.wheel.force-include]
 "frontier_agent/py.typed" = "frontier_agent/py.typed"
+
+[tool.uv]
+# Security floors for transitive packages reported by Dependabot. Keeping these
+# as resolver constraints avoids promoting implementation details of optional
+# dependencies to FrontierAgent's public runtime API.
+constraint-dependencies = [
+    "aiohttp>=3.14.3",
+    "cryptography>=50.0.0",
+    "h2>=4.4.1",
+    "idna>=3.15",
+    "litellm>=1.84.0",
+    "lxml>=6.1.0",
+    "mcp>=1.28.1",
+    "Pygments>=2.20.0",
+    "PyJWT>=2.13.0",
+    "python-multipart>=0.0.31",
+    "requests>=2.33.0",
+    "urllib3>=2.7.0",
+]
 
 [tool.ruff]
 target-version = "py312"

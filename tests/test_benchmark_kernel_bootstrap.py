@@ -14,6 +14,13 @@ from frontier_agent.scheduling.process_manager import ProcessManager
 
 @pytest.mark.asyncio
 async def test_benchmark_session_bootstraps_team_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
+    from frontier_agent.infra.config import get_config
+
+    # Reproduce the full-suite ordering where config is cached before a later
+    # bootstrap supplies credentials through the environment. OpenAI 2.54 must
+    # receive None, not the stale empty string, so it performs its env fallback.
+    cached_config = get_config(force_reload=True)
+    monkeypatch.setattr(cached_config, "openai_api_key", "")
     monkeypatch.setenv("OPENAI_API_KEY", "test")
     monkeypatch.setenv("OPENAI_BASE_URL", "http://127.0.0.1:9/v1")
     monkeypatch.setenv("OPENAI_MODEL", "test")

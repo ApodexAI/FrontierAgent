@@ -6,12 +6,21 @@ import json
 import logging
 import os
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import Any, Protocol
 
 from frontier_agent.core.llm import LLMClient, LLMResponse, StreamDelta
 from frontier_agent.core.messages import Message, ToolCall, text_of
 
 logger = logging.getLogger(__name__)
+
+
+class _MutableHeaders(Protocol):
+    def __setitem__(self, key: str, value: str) -> None: ...
+
+
+class _RequestWithHeaders(Protocol):
+    @property
+    def headers(self) -> _MutableHeaders: ...
 
 
 class AnthropicClient(LLMClient):
@@ -243,8 +252,6 @@ def _build_bedrock_client(
     else the Bedrock client gives for free is what we want — the
     ``/v1/messages`` → ``/model/{id}/invoke`` URL rewrite and the
     ``anthropic_version: bedrock-2023-05-31`` body stamp."""
-    import httpx
-
     # ``anthropic.AsyncAnthropicBedrock`` is the SDK's documented entry point,
     # but it is missing from the package's ``__all__``, so the checker suggests
     # importing from ``anthropic._client`` instead. Keep the public path — a
@@ -255,7 +262,9 @@ def _build_bedrock_client(
     bearer = api_key or ""
 
     class _BearerBedrock(AsyncAnthropicBedrock):
-        async def _prepare_request(self, request: httpx.Request) -> None:
+        # Anthropic 1.0 migrated its transport from httpx to httpx2. Both
+        # request types satisfy this deliberately narrow headers protocol.
+        async def _prepare_request(self, request: _RequestWithHeaders) -> None:
             request.headers["Authorization"] = f"Bearer {bearer}"
 
     return _BearerBedrock(
