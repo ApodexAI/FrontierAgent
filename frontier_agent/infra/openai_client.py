@@ -60,7 +60,11 @@ class OpenAIClient(LLMClient):
         # Per-call timeout is enforced by the agent loop's
         # ``asyncio.wait_for`` wrapper, not by the SDK.
         self._client = AsyncOpenAI(
-            api_key=api_key,
+            # OpenAI 2.54 rejects an explicitly supplied empty key before it
+            # consults OPENAI_API_KEY. A cached config can legitimately hold
+            # the pre-environment empty value, so treat it as unspecified and
+            # preserve the SDK's normal environment fallback.
+            api_key=api_key or None,
             base_url=base_url or None,
             timeout=timeout,
             default_headers=default_headers,
