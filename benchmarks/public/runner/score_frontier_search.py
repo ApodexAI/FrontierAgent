@@ -41,7 +41,7 @@ def _scorer_env() -> dict[str, str]:
             env["OPENROUTER_BASE_URL"] = env.get(url_var) or _DEFAULT_BASE_URL
             return env
 
-    # No credentials anywhere. Leave the key empty so the upstream scorer's
+    # No credentials anywhere. Leave the key empty so the bundled scorer's
     # own "OPENROUTER_API_KEY not set" check reports it.
     env["OPENROUTER_API_KEY"] = ""
     env.setdefault("OPENROUTER_BASE_URL", _DEFAULT_BASE_URL)

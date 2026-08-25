@@ -9,13 +9,13 @@ The benchmark tree has three deliberately separate areas:
   benchmarks such as GDPval, HLE, OfficeQA, BrowseComp, and FrontierScience,
   together with their registry, runner, judges, dataset tooling, and local
   result directories.
-- [`frontier_search_bench/`](frontier_search_bench/) is the independently
-  maintained [FrontierSearchBench](https://github.com/ApodexAI/frontier-search-bench)
-  source tree. It is kept at the top level so it remains visible and can be
-  synced to its future standalone open-source repository.
-- [`frontierchallenge/`](frontierchallenge/) contains FrontierChallenge's
-  standalone Harbor runtime, 97-task registry, taxonomy, image recipes,
-  documentation, and Hugging Face dataset setup flow.
+- [`frontier_search_bench/`](frontier_search_bench/) contains
+  [FrontierSearchBench](frontier_search_bench/): 41 verifiable deep-search
+  queries, their official scorers, and batch evaluation tooling. Answer
+  collection is integrated through the adapter under [`public/`](public/).
+- [`frontierchallenge/`](frontierchallenge/) contains
+  [FrontierChallenge](frontierchallenge/)'s Harbor runtime, 97-task registry,
+  taxonomy, image recipes, documentation, and Hugging Face dataset setup flow.
 
 The public evaluation harness runs one question per Python subprocess. Runs are
 independently reproducible, resumable, and protected from a single hung task by
@@ -40,7 +40,7 @@ Each dataset registers its default workflow and scoring implementation. Passing
 | `frontier_science_olympiad` | FrontierScience | `stateful-react-agent` | LLM judge |
 | `deepsearchqa` | DeepSearchQA | `stateful-react-agent` | LLM judge |
 | `widesearch` | WideSearch | `stateful-react-agent` | Structural F1 |
-| `frontier_search` | FrontierSearchBench | `stateful-react-agent` | Official external batch scorer |
+| `frontier_search` | FrontierSearchBench | `stateful-react-agent` | Bundled post-collection batch scorer |
 | `officeqa` | OfficeQA | `stateful-react-agent` | Official deterministic reward |
 | `officeqa_full` | OfficeQA-Full | `stateful-react-agent` | Official deterministic reward |
 | `gdpval` | GDPval | `stateful-react-agent` | Deterministic deliverable validation |
@@ -108,8 +108,8 @@ benchmarks/
 │   ├── scripts/               dataset download and standardization
 │   ├── datasets/              local source data (gitignored)
 │   └── results/               local run artifacts (gitignored)
-├── frontier_search_bench/     standalone benchmark source and official scorers
-└── frontierchallenge/         standalone scientific-workflow benchmark runtime
+├── frontier_search_bench/     FrontierSearchBench queries and official scorers
+└── frontierchallenge/         FrontierChallenge scientific-workflow runtime
 ```
 
 ## Add a benchmark

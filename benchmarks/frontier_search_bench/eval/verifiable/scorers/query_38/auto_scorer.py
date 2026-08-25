@@ -231,7 +231,7 @@ def get_client():
         base_url=base_url,
         api_key=api_key,
         default_headers={
-            "HTTP-Referer": "https://github.com/ApodexAI/frontier-search-bench",
+            "HTTP-Referer": "https://github.com/ApodexAI/FrontierAgent",
             "X-Title": "frontier-search-bench",
         },
     )

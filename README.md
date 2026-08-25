@@ -116,7 +116,7 @@ frontier_agent/  generic loop, scheduling, registries, AgentBus, observers
 plugins/tools/   web, shell, file, sandbox, and team tool implementations
 workflows/       ReAct and Agent Team pipelines, profiles, prompts, observers
 apodex/          terminal CLI/TUI, approvals, sessions, traces, and Docker path
-benchmarks/      public benchmark harness plus standalone FrontierSearchBench
+benchmarks/      public harness plus bundled FrontierSearchBench/FrontierChallenge
 ```
 
 More detail: [framework architecture](docs/framework.md),
