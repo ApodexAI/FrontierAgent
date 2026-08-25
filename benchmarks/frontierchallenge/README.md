@@ -1,7 +1,10 @@
-<h1 align="center">
-  <strong>FrontierChallenge</strong>&nbsp;&nbsp;
-  <img src="docs/assets/apodex-logo.png" alt="Apodex AI" width="190" align="middle">
-</h1>
+<div align="center">
+  <picture>
+    <img src="docs/assets/apodex-logo.png" width="30%" alt="Apodex AI">
+  </picture>
+</div>
+
+# FrontierChallenge
 
 <div align="center">
 
