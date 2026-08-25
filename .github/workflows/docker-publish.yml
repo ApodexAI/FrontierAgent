@@ -59,20 +59,9 @@ jobs:
         run: |
           image="$(printf '%s\n' "$IMAGE_TAGS" | head -n 1)"
           test -n "$image"
+          # The package is private by org policy, so this pull relies on the
+          # ghcr.io login established earlier in the job. Do not add an
+          # anonymous-pull check here: it cannot succeed.
           docker pull "$image"
           docker run --rm "$image" --version
           docker run --rm "$image" python tools/import_smoke.py --stage 2
-
-          # GHCR can briefly return 401 for anonymous requests immediately after
-          # a public image is pushed. Verify public access separately with retries.
-          docker logout ghcr.io
-          for attempt in 1 2 3 4 5 6; do
-            if docker pull "$image"; then
-              exit 0
-            fi
-            if [ "$attempt" -eq 6 ]; then
-              echo "::error::Published image is not anonymously pullable: $image"
-              exit 1
-            fi
-            sleep $((attempt * 5))
-          done

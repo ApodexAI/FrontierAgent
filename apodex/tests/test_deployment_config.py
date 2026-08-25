@@ -295,12 +295,15 @@ def test_publish_workflow_uses_canonical_image_and_runtime_smoke() -> None:
 
     assert f"images: {IMAGE}" in workflow
     assert "type=sha,format=long" in workflow
-    assert "docker logout ghcr.io" in workflow
-    assert workflow.index('docker pull "$image"') < workflow.index("docker logout ghcr.io")
-    assert "for attempt in 1 2 3 4 5 6" in workflow
-    assert "Published image is not anonymously pullable" in workflow
+    assert 'docker pull "$image"' in workflow
     assert 'docker run --rm "$image" --version' in workflow
     assert "python tools/import_smoke.py --stage 2" in workflow
+
+    # The published package is private by org policy, so the smoke test can only
+    # pull while the job still holds its ghcr.io login. An anonymous-pull check
+    # can never pass here; keep it from being reintroduced.
+    assert "docker logout ghcr.io" not in workflow
+    assert "anonymously pullable" not in workflow
 
 
 def test_user_docs_use_the_published_registry_name() -> None:
