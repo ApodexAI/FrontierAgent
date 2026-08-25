@@ -89,9 +89,9 @@ cp .env.example .env
 # edit .env and fill in OPENROUTER_API_KEY=sk-...
 ```
 
-`.env` may live in `eval/verifiable/`, its parent directory, or the
-FrontierSearchBench directory root — all three locations are loaded
-automatically.
+Place `.env` at `eval/verifiable/.env`, the location consistently supported by
+the batch runner and all query scorers. Alternatively, export
+`OPENROUTER_API_KEY` and `OPENROUTER_BASE_URL` in the environment.
 
 The code reads two environment variables: `OPENROUTER_API_KEY` (required) and `OPENROUTER_BASE_URL` (optional, default `https://openrouter.ai/api/v1`). Models are called through the OpenAI SDK.
 
