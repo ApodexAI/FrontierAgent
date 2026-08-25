@@ -11,7 +11,7 @@
 <div align="center">
   <a href="https://www.apodex.ai"><img alt="Online Service" src="https://img.shields.io/badge/🤖%20Online_Service-Apodex_1.1-1783ff"/></a>
   <a href="https://www.apodex.com/"><img alt="Homepage" src="https://img.shields.io/badge/Homepage-Apodex_AI-white"/></a>
-  <a href="https://platform.apodex.ai"><img alt="API" src="https://img.shields.io/badge/API-Apodex_1.1-1783ff"/></a>
+  <a href="https://platform.apodex.ai"><img alt="Try Apodex API" src="https://img.shields.io/badge/Try_Apodex_1.1-API_Platform-1783ff"/></a>
   <br>
   <a href="https://huggingface.co/collections/apodex"><img alt="Hugging Face" src="https://img.shields.io/badge/🤗%20Hugging_Face-Apodex_AI-ffc107"/></a>
   <a href="https://discord.gg/TDJA59TCng"><img alt="Discord" src="https://img.shields.io/badge/Discord-Apodex_AI-5865F2"/></a>
@@ -38,6 +38,13 @@ ships two native workflows:
 The same workflow engine powers the benchmark runner used to evaluate Apodex
 models. The framework, tools, workflows, and evaluation layer remain separate,
 so each can be reused independently.
+
+> **Want to try FrontierAgent without hosting a model?**
+>
+> Apodex-1.1 is available through the
+> **[Apodex API Platform](https://platform.apodex.ai/)**. Get an API key,
+> connect its OpenAI-compatible endpoint, and start running FrontierAgent in
+> minutes.
 
 New here? Use the **[documentation index](docs/README.md)** to find the right
 installation, SGLang, workflow, evaluation, or developer guide.
