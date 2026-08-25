@@ -14,7 +14,8 @@
 
 [Tasks](TASKS.md) · [Quickstart](docs/quickstart.md) ·
 [Hugging Face](https://huggingface.co/datasets/apodex/FrontierChallenge) ·
-[Website](https://urban-chainsaw-mnormyp.pages.github.io/) · [Citation](#citation)
+[Website](https://apodexai.github.io/FrontierAgent/benchmarks/FrontierChallenge/) ·
+[Citation](#citation)
 
 </div>
 
