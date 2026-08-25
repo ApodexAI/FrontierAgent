@@ -4,7 +4,9 @@
   </picture>
 </div>
 
-# FrontierChallenge
+---
+
+<br>
 
 <div align="center">
 
@@ -15,6 +17,8 @@
 [Website](https://urban-chainsaw-mnormyp.pages.github.io/) · [Citation](#citation)
 
 </div>
+
+# FrontierChallenge
 
 FrontierChallenge asks an agent to turn raw scientific data into specified,
 machine-checkable deliverables. It covers diffraction, spectroscopy, molecular
