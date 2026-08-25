@@ -12,19 +12,19 @@ around the checkout. That is why it has its own page — [`eval.md`](eval.md) ow
 everything the benchmarks share (installation, judge preflight, datasets, the
 runner's options, results), and this page owns only what is specific here.
 
-The benchmark source lives at
-[`benchmarks/frontier_search_bench/`](../benchmarks/frontier_search_bench/) as a
-squashed Git subtree of
-[`ApodexAI/frontier-search-bench`](https://github.com/ApodexAI/frontier-search-bench);
-see [`UPSTREAM.md`](../benchmarks/frontier_search_bench/UPSTREAM.md) for the
-import provenance and the `git subtree pull` command. FrontierAgent's adapter is
-deliberately outside that tree, in `benchmarks/public/families/frontier_search.py`,
-so the subtree stays syncable. The upstream README states that answer collection
-does not happen in its repository — inside FrontierAgent it does, through the
-shared subprocess runner described below.
+The canonical benchmark implementation lives at
+[`benchmarks/frontier_search_bench/`](../benchmarks/frontier_search_bench/).
+FrontierAgent's collection adapter is deliberately kept outside that directory,
+in
+[`benchmarks/public/families/frontier_search.py`](../benchmarks/public/families/frontier_search.py),
+so the query/scorer implementation remains separate from the shared runtime.
+See its [maintenance notes](../benchmarks/frontier_search_bench/UPSTREAM.md) for
+the ownership and isolation boundaries. The benchmark implementation consumes
+unified JSON answer files; inside FrontierAgent, the shared subprocess runner
+collects and exports those answers as described below.
 
 No dataset download is needed. The 41 queries and all 41 official scorers are
-bundled with the subtree.
+bundled with FrontierAgent.
 
 ## Evaluation isolation requirement
 
@@ -46,7 +46,7 @@ and prints a warning into the run's own output; it is not evidence of isolation.
 
 ## Credentials
 
-The wrapper maps `JUDGE_API_KEY` and `JUDGE_BASE_URL` onto the upstream scorer's
+The wrapper maps `JUDGE_API_KEY` and `JUDGE_BASE_URL` onto the scorer's
 `OPENROUTER_API_KEY` and `OPENROUTER_BASE_URL`, always as a pair from one
 provider — set `OPENROUTER_*` directly and the `JUDGE_*` values are left alone.
 
@@ -81,7 +81,7 @@ interrupted collection continues where it stopped.
 
 ## 2. Export
 
-Export the run into the upstream unified JSON contract. For a multi-run
+Export the run into the benchmark's unified JSON contract. For a multi-run
 evaluation, export each `run_<n>` separately as one model/run input.
 
 ```bash
@@ -98,8 +98,9 @@ of 41 would report a headline score for the 12 easiest. Finish the run, or pass
 ## 3. Score
 
 Run all 41 official scorers. The wrapper reuses `JUDGE_API_KEY` and
-`JUDGE_BASE_URL`, executes a temporary copy of the upstream tree, and preserves
-aggregate plus per-query artifacts under the requested result directory.
+`JUDGE_BASE_URL`, executes a temporary copy of the benchmark implementation,
+and preserves aggregate plus per-query artifacts under the requested result
+directory.
 
 ```bash
 uv run python -m benchmarks.public.runner.score_frontier_search \
@@ -128,9 +129,9 @@ an explicit step.
 
 ## Scoring internals
 
-Upstream's own documentation is the reference for what the scorers do:
+The bundled scorer documentation is the reference for what the scorers do:
 [`eval/verifiable/README.md`](../benchmarks/frontier_search_bench/eval/verifiable/README.md)
 covers the CLI, the three-stage pipeline, normalization, and the meaning of
 coverage. The unified JSON answer contract it consumes — and which
-`export_frontier_search` produces — is documented in the subtree's
+`export_frontier_search` produces — is documented in the benchmark's
 [`README.md`](../benchmarks/frontier_search_bench/README.md).

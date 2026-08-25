@@ -10,7 +10,7 @@ plugins, and benchmark evaluation. The framework layer has no dependency on
 frontier_agent/   generic loop, scheduling, registries, AgentBus, observers
 plugins/tools/   tool implementations and sandbox policy
 workflows/       pipeline specs, profiles, prompts, workflow-owned observers
-benchmarks/      public benchmark harness plus standalone FrontierSearchBench
+benchmarks/      public harness plus bundled FrontierSearchBench/FrontierChallenge
 ```
 
 ## Runtime flow

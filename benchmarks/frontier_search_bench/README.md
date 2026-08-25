@@ -2,7 +2,7 @@
 
 Apodex's benchmark for deep search / deep research. The goal is to compare AI platforms side by side on challenging tasks that are long-horizon, retrieval-heavy, and verifiable.
 
-The repository holds two things:
+This directory holds two things:
 
 1. **Verifiable benchmark queries** (`queries/verifiable.json`) — 41 evaluation inputs whose answers are unique or programmatically checkable (numbers, entities, enumerable sets, …).
 2. **Evaluation scripts** (`eval/verifiable/`) — auto-scoring of model answers (41/41 implemented).
@@ -13,7 +13,12 @@ The repository holds two things:
 queries/verifiable.json  ──►  (external collection: platform answers → unified JSON)  ──►  eval/verifiable/
 ```
 
-Answer collection does not happen in this repository; the eval scripts only consume the **unified JSON** interface below.
+The benchmark implementation in this directory does not collect answers; its
+eval scripts consume the **unified JSON** interface below. FrontierAgent's
+collection adapter lives in
+[`../public/families/frontier_search.py`](../public/families/frontier_search.py),
+and the complete collect/export/score workflow is documented in
+[`../../docs/eval-frontier-search.md`](../../docs/eval-frontier-search.md).
 
 **Query file** (`queries/verifiable.json`, 41 items) — each entry looks like:
 
@@ -47,10 +52,10 @@ The eval scripts read `report_content` and fall back to `response`. This is the 
 > python3 -c 'import json,pathlib;p=pathlib.Path;src=json.loads(p("queries/verifiable.json").read_text(encoding="utf-8"));p("queries/answer_template.json").write_text(json.dumps([{"id":e["id"],"query":e["query"],"report_content":"","response":""} for e in src],ensure_ascii=False,indent=2)+"\n",encoding="utf-8")'
 > ```
 
-## Repository layout
+## Directory layout
 
 ```
-frontier-search-bench/
+benchmarks/frontier_search_bench/
 ├── queries/
 │   └── verifiable.json           # 41 items
 └── eval/
@@ -63,7 +68,10 @@ frontier-search-bench/
 
 Requires **Python 3.10+**.
 
+From the FrontierAgent repository root:
+
 ```bash
+cd benchmarks/frontier_search_bench
 pip install -r eval/verifiable/requirements.txt
 cp eval/verifiable/.env.example eval/verifiable/.env   # fill in OPENROUTER_API_KEY
 ```
@@ -72,7 +80,9 @@ See [`eval/verifiable/README.md`](eval/verifiable/README.md) for details.
 
 ## Quickstart
 
-Prerequisite: unified JSON answer files prepared per the data contract above.
+Prerequisite: unified JSON answer files prepared per the data contract above,
+with the working directory set to `benchmarks/frontier_search_bench/` as shown
+in the environment setup.
 
 **1. Score a single query** (full instructions in [`eval/verifiable/README.md`](eval/verifiable/README.md)):
 

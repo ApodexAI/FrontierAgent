@@ -5,11 +5,11 @@ public benchmarks, including BrowseComp, HLE, OfficeQA, GDPval, and
 FrontierScience. It owns the registry, dataset adapters, judges, subprocess
 runner, download/standardization scripts, and gitignored local artifacts.
 
-The independently maintained FrontierSearchBench source is intentionally kept
-outside this package at [`../frontier_search_bench/`](../frontier_search_bench/).
-The adapter in `families/frontier_search.py` lets the shared runner collect its
-answers without mixing FrontierAgent-specific runtime code into that source
-tree.
+The bundled [FrontierSearchBench](../frontier_search_bench/) queries and scorers
+are kept in a sibling directory. The adapter in
+`families/frontier_search.py` lets the shared runner collect its answers while
+keeping FrontierAgent-specific runtime code out of the benchmark
+implementation.
 
 Run a one-question smoke evaluation after installing the eval dependencies and
 placing the selected dataset under `datasets/`:

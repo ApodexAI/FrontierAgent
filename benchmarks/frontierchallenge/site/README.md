@@ -1,14 +1,14 @@
 # FrontierChallenge website
 
 This directory contains the dependency-free static website for the benchmark.
-It lives in the public FrontierChallenge repository so website content, task
-documentation, and leaderboard links can evolve together.
+It lives in FrontierAgent alongside FrontierChallenge's task documentation and
+leaderboard links so they can evolve together.
 
 Published preview: <https://urban-chainsaw-mnormyp.pages.github.io/>
 
 ## Preview locally
 
-From the repository root, run:
+From `benchmarks/frontierchallenge/`, run:
 
 ```sh
 python3 -m http.server 8000 --directory site
@@ -16,15 +16,17 @@ python3 -m http.server 8000 --directory site
 
 Then visit <http://localhost:8000>. Stop the server with `Ctrl-C`.
 
-## Build for hosting
+## Build the Worker bundle
 
 ```sh
 python3 site/build_site.py
 ```
 
-The generated `site/dist/` directory is intentionally ignored by Git and is
-recreated for each hosting build. GitHub Pages deployment is defined in
-`.github/workflows/pages.yml`.
+The generated Worker module under `site/dist/` is intentionally ignored by Git
+and recreated for each bundle. The separate GitHub Pages deployment is defined
+in the repository-level
+[`frontierchallenge-pages.yml`](../../../.github/workflows/frontierchallenge-pages.yml)
+workflow.
 
 ## Paper figures
 

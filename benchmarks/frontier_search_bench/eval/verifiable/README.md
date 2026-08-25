@@ -1,6 +1,7 @@
 # Verifiable Eval — auto-scoring scripts
 
-Programmatic scoring for the 41 queries in `queries/verifiable.json` at the repository root.
+Programmatic scoring for the 41 queries in `queries/verifiable.json` at the
+FrontierSearchBench directory root.
 
 ## Directory layout
 
@@ -88,7 +89,9 @@ cp .env.example .env
 # edit .env and fill in OPENROUTER_API_KEY=sk-...
 ```
 
-`.env` may live in `eval/verifiable/`, its parent directory, or the repository root — all three locations are loaded automatically.
+`.env` may live in `eval/verifiable/`, its parent directory, or the
+FrontierSearchBench directory root — all three locations are loaded
+automatically.
 
 The code reads two environment variables: `OPENROUTER_API_KEY` (required) and `OPENROUTER_BASE_URL` (optional, default `https://openrouter.ai/api/v1`). Models are called through the OpenAI SDK.
 
