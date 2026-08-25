@@ -1,0 +1,51 @@
+# Declared explicitly so the PEP 639 `license = "CC-BY-4.0"` expression below is
+# guaranteed to parse: setuptools only understands the string form from 77.0.
+# Without this, an editable install on an older setuptools fails on the license
+# field rather than on anything real.
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "frontier-challenge"
+# Packaging-only placeholder. FrontierChallenge itself uses no release-version label.
+version = "0"
+description = "FrontierChallenge: evaluating AI systems on real scientific workflows"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "Apodex AI" }, { name = "GADE Union" }]
+keywords = ["benchmark", "agents", "evaluation", "scientific-computing"]
+license = "CC-BY-4.0"
+license-files = ["LICENSE"]
+
+# The harness. Pinned: task files declare schema_version 1.1 and every
+# published result was produced on this version.
+dependencies = [
+  "harbor==0.20.0",
+  "huggingface_hub>=0.33,<2",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.urls]
+Homepage = "https://github.com/ApodexAI/FrontierAgent/tree/main/benchmarks/frontierchallenge"
+Documentation = "https://github.com/ApodexAI/FrontierAgent/blob/main/benchmarks/frontierchallenge/docs/quickstart.md"
+
+# This distribution installs the pinned runtime dependencies; repository tools
+# are invoked from scripts/. Disable flat-layout package auto-discovery so
+# directories such as site/, release/, and shared_images/ are not mistaken for
+# import packages by setuptools.
+[tool.setuptools]
+packages = []
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# The repo's own tooling lives in scripts/ rather than an installed package,
+# so tests import it from there.
+pythonpath = ["scripts"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

@@ -1,0 +1,11 @@
+# Reviewed exceptions for check_public_leaks.py.
+#
+#   task/path                  waives a *phrasing* match on that file
+#   task/path::<number>        waives one specific *value-crossover* number
+#
+# Residue findings are never waivable: they mean the answer key itself is
+# sitting in the tree as plain text.
+#
+# This public allowlist intentionally contains no task-specific evaluator
+# paths, thresholds, or constants. Private pre-release audits may maintain a
+# separate reviewed allowlist beside their private checker invocation.

@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Input-only case studies from the FrontierChallenge scientific workflow benchmark." />
+    <title>Case studies — FrontierChallenge</title>
+    <link rel="icon" href="mark.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="styles.css?v=20260824-03" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="wordmark" aria-label="FrontierChallenge: A scientific workflow benchmark">
+        <img class="wordmark-mark" src="mark.svg" alt="" />
+        <span>FrontierChallenge: A scientific workflow benchmark</span>
+      </div>
+      <nav aria-label="Primary navigation">
+        <a href="index.html#top">Leaderboard</a>
+      </nav>
+    </header>
+
+    <main id="top" class="cases-main">
+      <section class="cases-intro" aria-labelledby="cases-title">
+        <p class="section-label">Case studies</p>
+        <h1 id="cases-title">What a complete scientific workflow looks like.</h1>
+        <p class="lede">Each case begins with scientific inputs and ends with a checkable artifact contract—not merely a final answer. These examples show the work an agent must organize, execute, document, and hand off.</p>
+      </section>
+
+      <article class="case-detail" id="xrd">
+        <header class="case-detail-header">
+          <p class="case-kicker">Task 005 · Materials · Hard</p>
+          <div>
+            <h2>Quantifying ferrite and austenite from raw XRD scans</h2>
+            <p class="case-summary">The agent receives diffraction patterns, scan metadata, a peak table, a phase reference, and analysis constants. It must correct instrument zero shift before estimating phase fractions and lattice parameters across scans and samples.</p>
+          </div>
+        </header>
+        <figure class="case-figure">
+          <img src="assets/cases/xrd-input.svg" alt="Raw diffraction patterns from LPBF fast, dual laser, and solution-annealed conditions" />
+          <figcaption>Agent-visible input preview: one raw scan from each processing condition. No corrected peaks, phase fractions, or reference results are shown.</figcaption>
+        </figure>
+        <div class="case-detail-grid">
+          <section class="case-fact">
+            <h3>Inputs</h3>
+            <p>Raw intensity-versus-angle scans, sample and scan identifiers, indexed peaks, phase assignments, an internal silicon standard, and the constants needed for reproducible calculations.</p>
+            <div class="case-tags"><span>CSV</span><span>JSON</span><span>raw patterns</span></div>
+          </section>
+          <section class="case-fact">
+            <h3>Workflow</h3>
+            <p>Determine the shift from the internal standard; exclude its peaks from phase quantification; compute scan-level phase fractions and lattice parameters; then aggregate statistics by sample.</p>
+          </section>
+          <section class="case-fact">
+            <h3>Required handoff</h3>
+            <p>A runnable analysis script, four schema-constrained CSV tables, an annotated pattern figure, a phase-fraction summary figure, and a report explaining the method and conclusions.</p>
+          </section>
+          <section class="case-fact">
+            <h3>Why it tests a workflow</h3>
+            <p>A plausible percentage is insufficient. Peak provenance, exclusions, per-scan calculations, aggregation, figures, and report claims must remain mutually consistent and auditable.</p>
+          </section>
+        </div>
+        <a class="case-open-link" href="case-xrd.html">Open the complete case <span aria-hidden="true">→</span></a>
+      </article>
+
+      <article class="case-detail" id="cell-migration">
+        <header class="case-detail-header">
+          <p class="case-kicker">Task 011 · Life science · Medium</p>
+          <div>
+            <h2>Measuring cell migration from time-lapse microscopy</h2>
+            <p class="case-summary">Eighteen bright-field images cover two groups, three biological replicates, and three time points. The agent must segment the experimenter-delineated wound, preserve replicate pairing, calculate migration rates, and compare groups statistically.</p>
+          </div>
+        </header>
+        <figure class="case-figure">
+          <img src="assets/cases/cell-migration-input.jpg" alt="Control replicate bright-field images at zero, twelve, and twenty-four hours" />
+          <figcaption>Agent-visible input preview: one control replicate over time. The white contour is drawn by the experimenter; segmented areas, migration rates, and statistical results are not shown.</figcaption>
+        </figure>
+        <div class="case-detail-grid">
+          <section class="case-fact">
+            <h3>Inputs</h3>
+            <p>Eighteen 1360 × 1024 images at 0, 12, and 24 hours, with control and experimental groups and three biological replicates per group.</p>
+            <div class="case-tags"><span>JPEG</span><span>time series</span><span>replicates</span></div>
+          </section>
+          <section class="case-fact">
+            <h3>Workflow</h3>
+            <p>Inspect and segment each closed white contour, quantify unmigrated area, pair images by group and replicate, compute time-specific migration rates, and run independent-samples tests at 12 and 24 hours.</p>
+          </section>
+          <section class="case-fact">
+            <h3>Required handoff</h3>
+            <p>A reusable analysis script, an 18-row image-level result table, a time-point statistics table, two mean ± SD plots with p-value annotations, and a methods-and-conclusions report.</p>
+          </section>
+          <section class="case-fact">
+            <h3>Why it tests a workflow</h3>
+            <p>Contour quality varies, so one brittle segmentation setting may fail. Image review, correct replicate pairing, statistics, plots, and narrative all have to agree.</p>
+          </section>
+        </div>
+        <a class="case-open-link" href="case-cell-migration.html">Open the complete case <span aria-hidden="true">→</span></a>
+      </article>
+
+      <article class="case-detail" id="eis">
+        <header class="case-detail-header">
+          <p class="case-kicker">Task 116 · Electrochemistry · Hard</p>
+          <div>
+            <h2>Selecting equivalent circuits from impedance spectra</h2>
+            <p class="case-summary">The agent receives several impedance datasets, including repeat scans and battery spectra at different states of charge. It must fit prescribed circuit families, compare them quantitatively, examine residuals, and connect frequency ranges to physical processes.</p>
+          </div>
+        </header>
+        <figure class="case-figure">
+          <img src="assets/cases/eis-input.svg" alt="Raw Nyquist spectra before circuit fitting" />
+          <figcaption>Agent-visible input preview: two raw Nyquist traces before circuit selection or fitting. No parameters, fit curves, metrics, or scientific conclusions are shown.</figcaption>
+        </figure>
+        <div class="case-detail-grid">
+          <section class="case-fact">
+            <h3>Inputs</h3>
+            <p>A generic impedance example plus independent battery scans, including repeated SOC 100 measurements and an SOC 70 dataset with two consecutive sweeps.</p>
+            <div class="case-tags"><span>CSV</span><span>frequency domain</span><span>repeat scans</span></div>
+          </section>
+          <section class="case-fact">
+            <h3>Workflow</h3>
+            <p>Validate sign and scan structure, fit the specified candidate circuits, estimate uncertainty, compare complex-residual metrics and AICc, inspect outliers, and interpret the frequency response with traceable sources.</p>
+          </section>
+          <section class="case-fact">
+            <h3>Required handoff</h3>
+            <p>Runnable source and dependencies; parameter, model-metric, and fitted-spectrum tables; Nyquist, Bode, and residual figures; provenance; reproduction steps; and a complete analysis report.</p>
+          </section>
+          <section class="case-fact">
+            <h3>Why it tests a workflow</h3>
+            <p>Convergence alone is not model selection. The chosen circuit, free and fixed parameters, residual structure, uncertainty, plots, provenance, and physical explanation must support one another.</p>
+          </section>
+        </div>
+        <a class="case-open-link" href="case-eis.html">Open the complete case <span aria-hidden="true">→</span></a>
+      </article>
+    </main>
+
+    <footer class="site-footer" data-shared-footer></footer>
+    <script src="site-shell.js?v=20260824-03"></script>
+  </body>
+</html>

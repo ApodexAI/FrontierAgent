@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg">
+  <symbol id="x" viewBox="0 0 24 24">
+    <path d="M4.5 3.75h4.5l10.5 16.5H15z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="m4.5 20.25 6.176-6.794M13.324 10.544 19.5 3.75" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+  </symbol>
+  <symbol id="linkedin" viewBox="0 0 24 24">
+    <rect x="3" y="3" width="18" height="18" rx=".75" fill="none" stroke="currentColor" stroke-width="1.5"/>
+    <circle cx="8.25" cy="7.875" r="1.125" fill="currentColor"/>
+    <path d="M8.25 10.5v6M11.25 10.5v6M11.25 13.125a2.625 2.625 0 0 1 5.25 0V16.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+  </symbol>
+  <symbol id="discord" viewBox="0 0 24 24">
+    <path d="M9.615 17.162c.592.059 1.186.089 1.781.088.595.001 1.189-.029 1.781-.088l.961 2.594a.75.75 0 0 0 1.031.428l6.282-2.785a.75.75 0 0 0 .426-.866L19.105 5.625a.75.75 0 0 0-.613-.562l-3.381-.555a.75.75 0 0 0-.863.562l-.469 1.841a17.01 17.01 0 0 0-3.77 0L9.54 5.07a.75.75 0 0 0-.863-.562l-3.381.555a.75.75 0 0 0-.613.562L1.911 16.533a.75.75 0 0 0 .426.866l6.282 2.785a.75.75 0 0 0 1.031-.428z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="8.625" cy="13.125" r="1.125" fill="currentColor"/><circle cx="15.375" cy="13.125" r="1.125" fill="currentColor"/>
+    <path d="M7.5 7.342a17.45 17.45 0 0 1 9 0M7.5 17.25a17.45 17.45 0 0 0 9 0" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+  </symbol>
+  <symbol id="github" viewBox="0 0 24 24">
+    <path d="M11.234 5.25A4.87 4.87 0 0 0 7.125 3a4.875 4.875 0 0 0-.327 4.191A4.47 4.47 0 0 0 6 9.75v.75A4.5 4.5 0 0 0 10.5 15H15a4.5 4.5 0 0 0 4.5-4.5v-.75a4.47 4.47 0 0 0-.798-2.559A4.875 4.875 0 0 0 18.375 3a4.87 4.87 0 0 0-4.109 2.25zM9.75 21.75V18a3 3 0 0 1 6 0v3.75" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M9.75 19.5h-3a3 3 0 0 1-3-3 3 3 0 0 0-3-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+  </symbol>
+</svg>

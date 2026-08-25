@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="FrontierChallenge: a benchmark for complete scientific workflows." />
+    <title>FrontierChallenge — Scientific workflow benchmark</title>
+    <link rel="icon" href="mark.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="styles.css?v=20260824-03" />
+  </head>
+  <body class="leaderboard-page">
+    <header class="site-header">
+      <div class="wordmark" aria-label="FrontierChallenge: A scientific workflow benchmark">
+        <img class="wordmark-mark" src="mark.svg" alt="" />
+        <span>FrontierChallenge: A scientific workflow benchmark</span>
+      </div>
+      <nav aria-label="Primary navigation">
+        <a href="index.html" aria-current="page">Leaderboard</a>
+      </nav>
+    </header>
+
+    <main id="top">
+      <section class="leaderboard-intro" aria-labelledby="leaderboard-title">
+        <h1 id="leaderboard-title">FrontierChallenge</h1>
+        <p class="lede">A benchmark for whether agent systems can complete specified scientific workflows and deliver a checkable artifact bundle.</p>
+      </section>
+
+      <section class="resource-links" aria-label="Project resources">
+        <a href="https://github.com/ApodexAI/FrontierAgent/tree/main/benchmarks/frontierchallenge" target="_blank" rel="noreferrer"><span>GitHub</span><i aria-hidden="true">↗</i></a>
+        <a href="#" aria-label="Paper link placeholder"><span>Paper</span><i aria-hidden="true">↗</i></a>
+        <a href="https://huggingface.co/datasets/apodex/FrontierChallenge" target="_blank" rel="noreferrer"><span>Hugging Face</span><i aria-hidden="true">↗</i></a>
+      </section>
+
+      <section id="leaderboard" class="leaderboard" aria-label="FrontierChallenge results">
+        <div class="table-scroll">
+          <table>
+            <colgroup>
+              <col class="col-rank" />
+              <col class="col-model" />
+              <col class="col-harness" />
+              <col class="col-pass-rate" />
+              <col class="col-release" />
+            </colgroup>
+            <thead>
+              <tr>
+                <th scope="col">Rank</th>
+                <th scope="col">Model</th>
+                <th scope="col">Agent Scaffold</th>
+                <th scope="col" class="sortable" data-sort-key="passRate" aria-sort="descending">
+                  <button class="sort-button" type="button" data-sort="passRate">Pass Rate <span class="sort-arrow" aria-hidden="true">↓</span></button>
+                </th>
+                <th scope="col" class="sortable" data-sort-key="release" aria-sort="none">
+                  <button class="sort-button" type="button" data-sort="release">Release <span class="sort-arrow" aria-hidden="true"></span></button>
+                </th>
+              </tr>
+            </thead>
+            <tbody id="leaderboard-body"></tbody>
+          </table>
+        </div>
+        <p class="table-caption">13 model–scaffold configurations · 97 tasks · Pass Rate = native Score ≥ 99.9.</p>
+      </section>
+
+      <section class="case-showcase" aria-labelledby="cases-title">
+        <div class="case-heading">
+          <div>
+            <p class="section-label">Selected cases</p>
+            <h2 id="cases-title">See the workflow, not just the score.</h2>
+          </div>
+        </div>
+
+        <div class="case-reel-viewport" data-case-carousel aria-roledescription="carousel" aria-label="Selected benchmark cases">
+          <div class="case-reel">
+          <a class="case-card case-card-wide case-card-high" href="case-xrd.html" aria-label="Explore the duplex phase quantification case">
+            <div class="case-media">
+              <img src="assets/cases/xrd-input.svg" alt="Three raw X-ray diffraction patterns from different processing conditions" />
+              <span class="case-number">01</span>
+            </div>
+            <div class="case-meta"><div><small>Materials characterization</small><h3>Duplex phase quantification</h3><p>Nine XRD scans become corrected, sample-level phase and lattice summaries.</p></div><span>Explore case →</span></div>
+          </a>
+          <a class="case-card case-card-medium case-card-low" href="case-cell-migration.html" aria-label="Explore the cell migration case">
+            <div class="case-media">
+              <img src="assets/cases/cell-migration-card.jpg" alt="Bright-field wound-healing images at zero, twelve, and twenty-four hours" />
+              <span class="case-number">02</span>
+            </div>
+            <div class="case-meta"><div><small>Life science</small><h3>Cell migration imaging</h3><p>Segment, pair, and compare a complete time-point × group × replicate experiment.</p></div><span>Explore case →</span></div>
+          </a>
+          <a class="case-card case-card-wide case-card-high" href="case-eis.html" aria-label="Explore the impedance circuit analysis case">
+            <div class="case-media">
+              <img src="assets/cases/eis-input.svg" alt="Raw electrochemical impedance spectra at two states of charge" />
+              <span class="case-number">03</span>
+            </div>
+            <div class="case-meta"><div><small>Electrochemistry</small><h3>Equivalent-circuit analysis</h3><p>Move from raw spectra to circuit comparison, residual evidence, and provenance.</p></div><span>Explore case →</span></div>
+          </a>
+          <a class="case-card case-card-compact case-card-low" href="case-qpcr.html" aria-label="Explore the RT-qPCR primer design case">
+            <div class="case-media case-media-structured qpcr-visual">
+              <div class="sequence-line"><span>…GACCTGACTG</span><b>J1</b><span>CTGAGCCTGA…</span></div>
+              <div class="constraint-chips"><span>Primer3</span><span>junction spanning</span><span>33 off-targets</span><span>paired specificity</span></div>
+              <div class="file-route"><span>target.fasta</span><i>→</i><span>primers.csv</span><i>→</i><span>qc_summary.json</span></div>
+              <span class="case-number">04</span>
+            </div>
+            <div class="case-meta"><div><small>Molecular biology</small><h3>RT-qPCR primer design</h3><p>Coordinate sequence constraints, thermodynamic QC, offline specificity, and a defensible recommendation.</p></div><span>Explore case →</span></div>
+          </a>
+          <a class="case-card case-card-medium case-card-high" href="case-ti.html" aria-label="Explore the hydration free energy case">
+            <div class="case-media case-media-structured ti-visual">
+              <div class="ti-path"><span>Gas</span><i>electrostatic</i><i>van der Waals</i></div>
+              <div class="lambda-track" aria-label="Nine lambda windows"><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b></div>
+              <div class="ti-path"><span>Water</span><i>electrostatic</i><i>van der Waals</i></div>
+              <div class="ti-artifacts"><span>9 λ windows × 4 paths</span><span>AMBER-native evidence</span></div>
+              <span class="case-number">05</span>
+            </div>
+            <div class="case-meta"><div><small>Molecular simulation</small><h3>Hydration free energy by TI</h3><p>Carry a fixed alchemical protocol through four paths and preserve every computational artifact.</p></div><span>Explore case →</span></div>
+          </a>
+          <a class="case-card case-card-wide case-card-low" href="case-calorimetry.html" aria-label="Explore the reaction calorimetry case">
+            <div class="case-media case-media-structured calorimetry-visual">
+              <div class="process-flow"><span>Calibrate</span><i>→</i><span>Blank correct</span><i>→</i><span>Integrate heat</span><i>→</i><span>Screen safety</span></div>
+              <div class="metric-stack"><span>ΔT<sub>ad</sub></span><span>MTSR</span><span>accumulation</span><span>heat recovery</span></div>
+              <div class="decision-route"><span>raw time series</span><i>→</i><span>protocol decision</span></div>
+              <span class="case-number">06</span>
+            </div>
+            <div class="case-meta"><div><small>Process chemistry</small><h3>Reaction-calorimetry safety</h3><p>Trace a scale-up decision back through calibration, corrections, integration, and replicate summaries.</p></div><span>Explore case →</span></div>
+          </a>
+          <a class="case-card case-card-wide case-card-high" href="case-qnmr.html" aria-label="Explore the quantitative NMR purity case">
+            <div class="case-media">
+              <img src="assets/cases/qnmr-input.png" alt="Four raw quantitative proton NMR spectra from two batches" />
+              <span class="case-number">07</span>
+            </div>
+            <div class="case-meta"><div><small>Analytical chemistry</small><h3>qNMR purity and spectral QC</h3><p>Turn replicate spectra into a traceable purity summary while rejecting poor-quality inputs from signal evidence.</p></div><span>Explore case →</span></div>
+          </a>
+          <a class="case-card case-card-medium case-card-low" href="case-lfa.html" aria-label="Explore the laser flash thermal analysis case">
+            <div class="case-media">
+              <img src="assets/cases/lfa-input.png" alt="Raw laser-flash detector curves for three boron nitride loadings" />
+              <span class="case-number">08</span>
+            </div>
+            <div class="case-meta"><div><small>Materials characterization</small><h3>Laser-flash thermal analysis</h3><p>Sort shuffled temperature-rise traces, identify anomalous curves, and preserve run-to-sample provenance.</p></div><span>Explore case →</span></div>
+          </a>
+          <a class="case-card case-card-wide case-card-high" href="case-gitt.html" aria-label="Explore the battery GITT diffusion case">
+            <div class="case-media">
+              <img src="assets/cases/gitt-input.png" alt="Raw voltage sequence from a hard-carbon sodium-ion battery GITT experiment" />
+              <span class="case-number">09</span>
+            </div>
+            <div class="case-meta"><div><small>Electrochemistry</small><h3>GITT diffusion analysis</h3><p>Resolve pulse, rest, and relaxation stages across six cells into auditable SOC-dependent transport metrics.</p></div><span>Explore case →</span></div>
+          </a>
+          <a class="case-card case-card-medium case-card-low" href="case-photoredox.html" aria-label="Explore the photoredox quantum yield case">
+            <div class="case-media">
+              <img src="assets/cases/photoredox-input.png" alt="Raw blue LED spectra for three photoredox experiment conditions" />
+              <span class="case-number">10</span>
+            </div>
+            <div class="case-meta"><div><small>Photochemistry</small><h3>Photoredox photon balance</h3><p>Combine actinometry, lamp spectra, reaction absorbance, assays, controls, and held-out validation.</p></div><span>Explore case →</span></div>
+          </a>
+          </div>
+        </div>
+      </section>
+
+    </main>
+
+    <footer class="site-footer" data-shared-footer></footer>
+    <script src="site-shell.js?v=20260824-03"></script>
+    <script src="script.js?v=20260824-03"></script>
+  </body>
+</html>

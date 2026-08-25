@@ -1,0 +1,9 @@
+# Restricted installers/binaries must never enter the redistributable build
+# context. User-supplied ORCA work belongs outside this repository entirely.
+orca/
+ORCA/
+ORCA*.run
+orca*.run
+ORCA*.tar*
+orca*.tar*
+assets/*.zip
