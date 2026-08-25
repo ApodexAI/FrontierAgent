@@ -14,7 +14,13 @@
     "scripts"
   ],
 
-  "exclude": ["**/.venv", "**/node_modules", "**/__pycache__", "**/.*_cache"],
+  "exclude": [
+    "**/.venv",
+    "**/node_modules",
+    "**/__pycache__",
+    "**/.*_cache",
+    "benchmarks/frontierchallenge"
+  ],
 
   // "ignore" rather than "exclude": excluded files are dropped from the
   // workspace pass but Pylance still analyses and squiggles them once opened,

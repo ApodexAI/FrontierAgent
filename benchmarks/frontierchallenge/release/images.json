@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "platform": "linux/amd64",
+  "images": {
+    "open": {
+      "ref": "frontierchallenge/cpu-open:2026.08",
+      "distribution": "huggingface-dataset-archive",
+      "hf_archive": {
+        "path": "images/frontierchallenge-cpu-open-2026.08.docker.tar.zst",
+        "manifest": "images/manifest.json",
+        "format": "docker-archive+zstd",
+        "loaded_ref": "frontierchallenge/cpu-open:2026.08"
+      },
+      "task_count": 81,
+      "redistributable": true
+    },
+    "licensed-orca": {
+      "ref": "frontierchallenge/orca-user-local:6.0.1",
+      "task_count": 16,
+      "redistributable": false
+    }
+  }
+}

@@ -1,0 +1,24 @@
+# Credentials — never commit
+.env
+.frontierchallenge/
+.env.*
+!.env.example
+
+# Run outputs
+results/
+*.log
+
+# Task payloads are downloaded from the split Hugging Face datasets and staged
+# outside the checkout. Never add a local task cache back to GitHub.
+/tasks/
+dist/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# OS
+.DS_Store
+.pytest_cache/

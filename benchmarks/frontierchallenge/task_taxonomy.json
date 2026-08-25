@@ -1,0 +1,390 @@
+{
+ "task_005_xrd_duplex_phase_quant": [
+  "Materials Characterization",
+  "Diffraction"
+ ],
+ "task_006_matbench_expt_gap_cleaning": [
+  "Materials Characterization",
+  "Thermal, mechanical & transport"
+ ],
+ "task_007_pxrd_indexing_cell_refinement": [
+  "Materials Characterization",
+  "Diffraction"
+ ],
+ "task_008_qpcr_primer_design": [
+  "Life Science",
+  "Molecular biology & assays"
+ ],
+ "task_009_raman_graphene_qc": [
+  "Materials Characterization",
+  "Spectroscopy & magnetism"
+ ],
+ "task_010_polarization_316l_corrosion": [
+  "Electrochemistry",
+  "Corrosion & electrocatalysis"
+ ],
+ "task_011_cell_migration_wound_healing": [
+  "Life Science",
+  "Quantitative imaging"
+ ],
+ "task_022_xrd_residual_stress": [
+  "Materials Characterization",
+  "Diffraction"
+ ],
+ "task_023_tce_dual_isotope_degradation": [
+  "Analytical Chemistry",
+  "Reaction, process & environment"
+ ],
+ "task_024_methanol_carbon_balance": [
+  "Analytical Chemistry",
+  "Reaction, process & environment"
+ ],
+ "task_025_bone_scaffold_microct": [
+  "Materials Characterization",
+  "Microscopy & imaging"
+ ],
+ "task_026_suzuki_reaction_kinetics": [
+  "Analytical Chemistry",
+  "Reaction, process & environment"
+ ],
+ "task_027_nitrosamine_lcms_nmr": [
+  "Analytical Chemistry",
+  "Separation & mass spectrometry"
+ ],
+ "task_028_photoredox_quantum_yield": [
+  "Analytical Chemistry",
+  "Reaction, process & environment"
+ ],
+ "task_029_extraction_crystallization_balance": [
+  "Analytical Chemistry",
+  "Reaction, process & environment"
+ ],
+ "task_030_disulfide_bond_ms": [
+  "Analytical Chemistry",
+  "Separation & mass spectrometry"
+ ],
+ "task_031_tofsims_deuterium_segregation": [
+  "Materials Characterization",
+  "Microscopy & imaging"
+ ],
+ "task_032_co2_capture_solvent_cycle": [
+  "Analytical Chemistry",
+  "Reaction, process & environment"
+ ],
+ "task_033_itc_proton_coupling": [
+  "Analytical Chemistry",
+  "Spectroscopy & quantitative analysis"
+ ],
+ "task_034_nrtl_vle_azeotrope": [
+  "Analytical Chemistry",
+  "Reaction, process & environment"
+ ],
+ "task_035_ebsd_austenite_reconstruction": [
+  "Materials Characterization",
+  "Microscopy & imaging"
+ ],
+ "task_036_pfg_nmr_self_association": [
+  "Analytical Chemistry",
+  "Spectroscopy & quantitative analysis"
+ ],
+ "task_037_stem_strain_mapping": [
+  "Materials Characterization",
+  "Microscopy & imaging"
+ ],
+ "task_038_hzo_pund_polarization": [
+  "Electrochemistry",
+  "Polarization & ferroelectrics"
+ ],
+ "task_039_epr_ros_pathway": [
+  "Analytical Chemistry",
+  "Spectroscopy & quantitative analysis"
+ ],
+ "task_040_mossbauer_spin_crossover": [
+  "Materials Characterization",
+  "Spectroscopy & magnetism"
+ ],
+ "task_041_chromium_speciation_lcicpms": [
+  "Analytical Chemistry",
+  "Separation & mass spectrometry"
+ ],
+ "task_042_rrde_orr_selectivity": [
+  "Electrochemistry",
+  "Corrosion & electrocatalysis"
+ ],
+ "task_043_antisolvent_crystallization": [
+  "Analytical Chemistry",
+  "Reaction, process & environment"
+ ],
+ "task_044_asymmetric_reduction_characterization": [
+  "Analytical Chemistry",
+  "Reaction, process & environment"
+ ],
+ "task_045_dic_steel_tensile": [
+  "Materials Characterization",
+  "Thermal, mechanical & transport"
+ ],
+ "task_046_lpbf_meltpool_xct": [
+  "Materials Characterization",
+  "Microscopy & imaging"
+ ],
+ "task_048_scxrd_twin_disorder": [
+  "Materials Characterization",
+  "Diffraction"
+ ],
+ "task_050_seawater_carbonate_system": [
+  "Analytical Chemistry",
+  "Reaction, process & environment"
+ ],
+ "task_051_quantum_output_substituent_effects": [
+  "Quantum Chemistry",
+  "Electronic structure"
+ ],
+ "task_052_protein_md_structure_prep": [
+  "Molecular Dynamics",
+  "System preparation"
+ ],
+ "task_053_protein_cgmd_structure_prep": [
+  "Molecular Dynamics",
+  "System preparation"
+ ],
+ "task_054_ethanol_md_properties": [
+  "Molecular Dynamics",
+  "Transport & bulk properties"
+ ],
+ "task_055_opp_c60_xtb_igm": [
+  "Quantum Chemistry",
+  "Electronic structure"
+ ],
+ "task_056_silica_melt_quench_md": [
+  "Molecular Dynamics",
+  "Transport & bulk properties"
+ ],
+ "task_057_tunel_dapi_image_ratio": [
+  "Life Science",
+  "Quantitative imaging"
+ ],
+ "task_058_ki67_hscore_imaging": [
+  "Life Science",
+  "Quantitative imaging"
+ ],
+ "task_059_alanine_dipeptide_md": [
+  "Molecular Dynamics",
+  "Transport & bulk properties"
+ ],
+ "task_060_streptavidin_biotin_md": [
+  "Molecular Dynamics",
+  "Transport & bulk properties"
+ ],
+ "task_061_mmgbsa_residue_decomposition": [
+  "Molecular Dynamics",
+  "Free energy"
+ ],
+ "task_062_hydration_free_energy_ti": [
+  "Molecular Dynamics",
+  "Free energy"
+ ],
+ "task_063_alanine_metadynamics_fes": [
+  "Molecular Dynamics",
+  "Enhanced sampling"
+ ],
+ "task_064_protein_tremd_sampling": [
+  "Molecular Dynamics",
+  "Enhanced sampling"
+ ],
+ "task_066_rnaseq_differential_expression": [
+  "Life Science",
+  "Genomics & transcriptomics"
+ ],
+ "task_067_gwas_analysis_visualization": [
+  "Life Science",
+  "Genomics & transcriptomics"
+ ],
+ "task_068_wgcna_analysis_visualization": [
+  "Life Science",
+  "Genomics & transcriptomics"
+ ],
+ "task_072_pt_co_adsorption": [
+  "Quantum Chemistry",
+  "QM/MM & periodic DFT"
+ ],
+ "task_073_ion_diffusion_lammps": [
+  "Molecular Dynamics",
+  "Transport & bulk properties"
+ ],
+ "task_075_n2_nevpt2_pes": [
+  "Quantum Chemistry",
+  "Electronic structure"
+ ],
+ "task_094_qnmr_purity_qc": [
+  "Analytical Chemistry",
+  "Spectroscopy & quantitative analysis"
+ ],
+ "task_097_dsc_kissinger_kinetics": [
+  "Materials Characterization",
+  "Thermal, mechanical & transport"
+ ],
+ "task_098_orca_claisen_thermochemistry": [
+  "Quantum Chemistry",
+  "Transition states & kinetics"
+ ],
+ "task_099_hardcarbon_gitt_diffusion": [
+  "Electrochemistry",
+  "Batteries & impedance"
+ ],
+ "task_100_tga_caco3_composition": [
+  "Materials Characterization",
+  "Thermal, mechanical & transport"
+ ],
+ "task_101_ic_anion_quantification": [
+  "Analytical Chemistry",
+  "Separation & mass spectrometry"
+ ],
+ "task_102_tlc_suzuki_endpoint": [
+  "Analytical Chemistry",
+  "Separation & mass spectrometry"
+ ],
+ "task_103_gpc_polymer_mwd": [
+  "Materials Characterization",
+  "Thermal, mechanical & transport"
+ ],
+ "task_104_aln_bn_laser_flash": [
+  "Materials Characterization",
+  "Thermal, mechanical & transport"
+ ],
+ "task_105_nmc_battery_cycling": [
+  "Electrochemistry",
+  "Batteries & impedance"
+ ],
+ "task_106_kf_solvent_moisture": [
+  "Analytical Chemistry",
+  "Spectroscopy & quantitative analysis"
+ ],
+ "task_107_aln_lfa_thermal": [
+  "Materials Characterization",
+  "Thermal, mechanical & transport"
+ ],
+ "task_108_ldh_purification": [
+  "Life Science",
+  "Molecular biology & assays"
+ ],
+ "task_109_reaction_calorimetry_safety": [
+  "Analytical Chemistry",
+  "Reaction, process & environment"
+ ],
+ "task_110_bi2te3_thermoelectric": [
+  "Materials Characterization",
+  "Thermal, mechanical & transport"
+ ],
+ "task_111_flyash_xrd_quantification": [
+  "Materials Characterization",
+  "Diffraction"
+ ],
+ "task_112_in718_creep_screening": [
+  "Materials Characterization",
+  "Thermal, mechanical & transport"
+ ],
+ "task_113_jr_curve_toughness": [
+  "Materials Characterization",
+  "Thermal, mechanical & transport"
+ ],
+ "task_114_he_tumor_infiltration": [
+  "Life Science",
+  "Quantitative imaging"
+ ],
+ "task_115_ccrcc_blind_annotation": [
+  "Life Science",
+  "Genomics & transcriptomics"
+ ],
+ "task_116_eis_equivalent_circuit_analysis": [
+  "Electrochemistry",
+  "Batteries & impedance"
+ ],
+ "task_117_cp2k_mgo_phonon": [
+  "Analytical Chemistry",
+  "Spectroscopy & quantitative analysis"
+ ],
+ "task_118_cu_al_interface_energy": [
+  "Quantum Chemistry",
+  "QM/MM & periodic DFT"
+ ],
+ "task_121_caffeine_1h_nmr": [
+  "Analytical Chemistry",
+  "Spectroscopy & quantitative analysis"
+ ],
+ "task_199_b3lyp_opt_freq_minimum": [
+  "Quantum Chemistry",
+  "Electronic structure"
+ ],
+ "task_200_b3lyp_ts_opt_freq_thermo": [
+  "Quantum Chemistry",
+  "Transition states & kinetics"
+ ],
+ "task_201_qmmm_lysozyme_benzene_min": [
+  "Quantum Chemistry",
+  "QM/MM & periodic DFT"
+ ],
+ "task_201_sn2_qmmm_pmf": [
+  "Molecular Dynamics",
+  "Free energy"
+ ],
+ "task_202_ilov_fmn_qmmm": [
+  "Quantum Chemistry",
+  "QM/MM & periodic DFT"
+ ],
+ "task_202_neb_cineb_mep_barrier": [
+  "Quantum Chemistry",
+  "Transition states & kinetics"
+ ],
+ "task_203_claisen_rearrangement_ts": [
+  "Quantum Chemistry",
+  "Transition states & kinetics"
+ ],
+ "task_203_qmmm_trypsin_link_atom": [
+  "Quantum Chemistry",
+  "QM/MM & periodic DFT"
+ ],
+ "task_204_opes_metad_alanine_fes": [
+  "Molecular Dynamics",
+  "Enhanced sampling"
+ ],
+ "task_205_umbrella_wham_nacl_pmf": [
+  "Molecular Dynamics",
+  "Free energy"
+ ],
+ "task_206_smd_jarzynski_ala10": [
+  "Molecular Dynamics",
+  "Free energy"
+ ],
+ "task_207_aimd_water_vacf": [
+  "Molecular Dynamics",
+  "Transport & bulk properties"
+ ],
+ "task_208_kie_formamide_solvation": [
+  "Quantum Chemistry",
+  "Transition states & kinetics"
+ ],
+ "task_209_oniom_claisen_barrier": [
+  "Quantum Chemistry",
+  "Transition states & kinetics"
+ ],
+ "task_210_ts_goat_irc": [
+  "Quantum Chemistry",
+  "Transition states & kinetics"
+ ],
+ "task_211_ecd_nmr_propylene_oxide": [
+  "Quantum Chemistry",
+  "Spectroscopy prediction"
+ ],
+ "task_212_ir_uvvis_benzaldehyde": [
+  "Quantum Chemistry",
+  "Spectroscopy prediction"
+ ],
+ "task_215_butadiene_active_space_transferability": [
+  "Quantum Chemistry",
+  "Electronic structure"
+ ],
+ "task_216_n2_multireference_curve_nevpt2": [
+  "Quantum Chemistry",
+  "Electronic structure"
+ ]
+}

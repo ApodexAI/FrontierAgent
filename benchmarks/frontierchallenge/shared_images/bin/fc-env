@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  echo "usage: fc-env <general|amber24> [command ...]" >&2
+  exit 2
+}
+
+environment=${1:-}
+[[ -n "$environment" ]] || usage
+shift
+
+case "$environment" in
+  general|amber24) ;;
+  *) usage ;;
+esac
+
+if (($#)); then
+  exec micromamba run -n "$environment" "$@"
+fi
+exec bash --rcfile <(printf 'export PATH=/opt/conda/envs/%s/bin:$PATH\n' "$environment")
+

@@ -124,6 +124,7 @@ constraint-dependencies = [
 [tool.ruff]
 target-version = "py312"
 line-length = 100
+extend-exclude = ["benchmarks/frontierchallenge"]
 
 [tool.ruff.lint]
 # Beyond ruff's default E4/E7/E9/F. ANN is the one that keeps the typing work

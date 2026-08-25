@@ -3,7 +3,7 @@
 [Documentation index](../docs/README.md) ·
 [Evaluation operator guide](../docs/eval.md)
 
-The benchmark tree has two deliberately separate areas:
+The benchmark tree has three deliberately separate areas:
 
 - [`public/`](public/) contains FrontierAgent's integrations for public
   benchmarks such as GDPval, HLE, OfficeQA, BrowseComp, and FrontierScience,
@@ -13,6 +13,9 @@ The benchmark tree has two deliberately separate areas:
   maintained [FrontierSearchBench](https://github.com/ApodexAI/frontier-search-bench)
   source tree. It is kept at the top level so it remains visible and can be
   synced to its future standalone open-source repository.
+- [`frontierchallenge/`](frontierchallenge/) contains FrontierChallenge's
+  standalone Harbor runtime, 97-task registry, taxonomy, image recipes,
+  documentation, and Hugging Face dataset setup flow.
 
 The public evaluation harness runs one question per Python subprocess. Runs are
 independently reproducible, resumable, and protected from a single hung task by
@@ -105,7 +108,8 @@ benchmarks/
 │   ├── scripts/               dataset download and standardization
 │   ├── datasets/              local source data (gitignored)
 │   └── results/               local run artifacts (gitignored)
-└── frontier_search_bench/     standalone benchmark source and official scorers
+├── frontier_search_bench/     standalone benchmark source and official scorers
+└── frontierchallenge/         standalone scientific-workflow benchmark runtime
 ```
 
 ## Add a benchmark
