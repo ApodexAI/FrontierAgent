@@ -1,0 +1,80 @@
+name: Deploy FrontierChallenge site
+
+on:
+  pull_request:
+    paths:
+      - "benchmarks/frontierchallenge/site/**"
+      - ".github/workflows/frontierchallenge-pages.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "benchmarks/frontierchallenge/site/**"
+      - ".github/workflows/frontierchallenge-pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: frontierchallenge-pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Validate and package static site
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Validate publication source
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_dir="benchmarks/frontierchallenge/site"
+          test -f "${source_dir}/index.html"
+
+          if find "${source_dir}" -type l -print -quit | grep -q .; then
+            echo "Refusing to publish symbolic links from ${source_dir}." >&2
+            exit 1
+          fi
+
+          if grep -RInE '(href|src)="/' "${source_dir}" --include='*.html'; then
+            echo "Root-absolute asset links would break at the nested Pages URL." >&2
+            exit 1
+          fi
+
+      - name: Stage only the FrontierChallenge website
+        shell: bash
+        run: |
+          set -euo pipefail
+          destination="_site/benchmarks/FrontierChallenge"
+          mkdir -p "${destination}"
+          cp -R benchmarks/frontierchallenge/site/. "${destination}/"
+          touch _site/.nojekyll
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4
+        with:
+          path: _site
+
+  deploy:
+    name: Deploy from main
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
+
+      - name: Deploy Pages artifact
+        id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
