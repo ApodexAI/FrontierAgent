@@ -1,7 +1,12 @@
-<h1 align="center">
-  <strong>FrontierChallenge</strong>&nbsp;&nbsp;
-  <img src="docs/assets/apodex-logo.png" alt="Apodex AI" width="190" align="middle">
-</h1>
+<div align="center">
+  <picture>
+    <img src="docs/assets/apodex-logo.png" width="30%" alt="Apodex AI">
+  </picture>
+</div>
+
+---
+
+<br>
 
 <div align="center">
 
@@ -9,9 +14,12 @@
 
 [Tasks](TASKS.md) · [Quickstart](docs/quickstart.md) ·
 [Hugging Face](https://huggingface.co/datasets/apodex/FrontierChallenge) ·
-[Website](https://urban-chainsaw-mnormyp.pages.github.io/) · [Citation](#citation)
+[Website](https://apodexai.github.io/FrontierAgent/benchmarks/FrontierChallenge/) ·
+[Citation](#citation)
 
 </div>
+
+# FrontierChallenge
 
 FrontierChallenge asks an agent to turn raw scientific data into specified,
 machine-checkable deliverables. It covers diffraction, spectroscopy, molecular

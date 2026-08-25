@@ -4,7 +4,7 @@ This directory contains the dependency-free static website for the benchmark.
 It lives in FrontierAgent alongside FrontierChallenge's task documentation and
 leaderboard links so they can evolve together.
 
-Published preview: <https://urban-chainsaw-mnormyp.pages.github.io/>
+Published site: <https://apodexai.github.io/FrontierAgent/benchmarks/FrontierChallenge/>
 
 ## Preview locally
 

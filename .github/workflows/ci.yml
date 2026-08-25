@@ -54,6 +54,20 @@ jobs:
       # what this step enforces.
       - name: Pyright type check
         run: uv run pyright
+      - name: FrontierChallenge release gates
+        run: |
+          uv run pytest -q \
+            -c benchmarks/frontierchallenge/pyproject.toml \
+            benchmarks/frontierchallenge/tests
+          uv run python benchmarks/frontierchallenge/scripts/check_public_leaks.py \
+            benchmarks/frontierchallenge --allow-empty
+          uv run python benchmarks/frontierchallenge/scripts/check_restricted_software.py \
+            benchmarks/frontierchallenge
+          for script in \
+            benchmarks/frontierchallenge/scripts/*.sh \
+            benchmarks/frontierchallenge/shared_images/*.sh; do
+            bash -n "$script"
+          done
       - name: Unit and exec-bundle tests
         env:
           SANDBOX_BACKEND: bwrap
