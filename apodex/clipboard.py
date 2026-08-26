@@ -12,7 +12,6 @@ import filecmp
 import json
 import os
 import secrets
-import shlex
 import subprocess
 import sys
 import tempfile
@@ -117,34 +116,40 @@ def _read_macos_pasteboard(temp_dir: str) -> dict[str, Any]:
     return payload
 
 
+def _looks_like_file_urls(text: str) -> bool:
+    """Report whether every non-blank line is a ``file://`` URL, without touching disk.
+
+    Used where the text is untrusted and must not be resolved: a purely textual
+    check leaks nothing about which host paths exist.
+    """
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    return bool(lines) and all(line.startswith("file://") for line in lines)
+
+
 def _path_text(text: str) -> list[str] | None:
-    """Return absolute existing paths represented by clipboard text."""
+    """Return local paths represented by explicit ``file://`` URLs.
+
+    Plain absolute-path text is deliberately not promoted to an attachment:
+    copied webpage or chat content must not be able to make the client stage a
+    readable host file merely because its text happens to name one.
+
+    Only ever called on input the local user produced — a real pasteboard read,
+    or a paste into a TUI running natively on the host. Text arriving over the
+    broker is container-controlled and must not reach this function; see
+    ``_broker_text_paste``.
+    """
     raw = text.strip()
     if not raw:
         return None
     lines = [line.strip() for line in raw.splitlines() if line.strip()]
-    if lines and all(line.startswith("file://") for line in lines):
-        candidates = []
-        for line in lines:
-            parsed = urlparse(line)
-            if parsed.scheme == "file":
-                candidates.append(unquote(parsed.path))
-    elif len(lines) > 1 and all(
-        Path(line.strip("'\"")).expanduser().is_absolute()
-        and Path(line.strip("'\"")).expanduser().exists()
-        for line in lines
-    ):
-        candidates = [line.strip("'\"") for line in lines]
-    else:
-        try:
-            candidates = shlex.split(raw)
-        except ValueError:
-            candidates = [line.strip() for line in raw.splitlines() if line.strip()]
-        # A single unescaped path may contain spaces. Prefer it when it exists.
-        if Path(raw).expanduser().is_absolute() and Path(raw).expanduser().exists():
-            candidates = [raw]
-    if not candidates:
+    if not lines or not all(line.startswith("file://") for line in lines):
         return None
+    candidates: list[str] = []
+    for line in lines:
+        parsed = urlparse(line)
+        if parsed.scheme != "file" or parsed.netloc not in {"", "localhost"}:
+            return None
+        candidates.append(unquote(parsed.path))
     resolved: list[str] = []
     for candidate in candidates:
         path = Path(candidate).expanduser()
@@ -157,7 +162,12 @@ def _path_text(text: str) -> list[str] | None:
 def capture_macos_clipboard(
     manager: AttachmentManager, *, pasted_text: str | None = None,
 ) -> ClipboardPaste:
-    """Capture Finder files, an image, a path string, or ordinary text."""
+    """Capture Finder files, an image, a path string, or ordinary text.
+
+    ``pasted_text`` is trusted here: the only callers are the local user's own
+    paste, either natively or via the broker's pasteboard read. The broker's
+    request path deliberately does not route request text through this function.
+    """
     if pasted_text is not None:
         paths = _path_text(pasted_text)
         if paths is None:
@@ -204,6 +214,23 @@ def capture_macos_clipboard(
         raise ClipboardError(str(payload.get("message") or "unsupported clipboard content"))
 
 
+def _broker_text_paste(pasted_text: str) -> ClipboardPaste:
+    """Wrap container-supplied paste text, explaining a gesture the bridge drops.
+
+    Dragging a file into the terminal pastes ``file://`` URLs, which the native
+    TUI stages as an attachment. Over the bridge the same text is indistinguishable
+    from a request forged by container code, so it stays text — but the user gets
+    told why, plus the Finder-copy route that does work through the bridge.
+    """
+    message = (
+        "dropped file paths cannot be attached through the container clipboard "
+        "bridge; copy the file in Finder (Cmd-C) and paste again to attach it"
+        if _looks_like_file_urls(pasted_text)
+        else ""
+    )
+    return ClipboardPaste("text", text=pasted_text, message=message)
+
+
 class ClipboardBroker:
     """Loopback-only host service used by the macOS Docker TUI."""
 
@@ -230,8 +257,15 @@ class ClipboardBroker:
                     pasted_text = request.get("text") if isinstance(request, dict) else None
                     if pasted_text is not None and not isinstance(pasted_text, str):
                         raise ClipboardError("invalid pasted text")
-                    response = capture_macos_clipboard(
-                        broker.manager, pasted_text=pasted_text,
+                    # The bearer token is available to the container so it can
+                    # call this bridge. Never treat request data as a host path:
+                    # doing so would let container code copy arbitrary readable
+                    # host files into its attachment mount. Only a real macOS
+                    # pasteboard read may produce host file attachments.
+                    response = (
+                        _broker_text_paste(pasted_text)
+                        if pasted_text is not None
+                        else capture_macos_clipboard(broker.manager)
                     )
                     body = json.dumps(asdict(response)).encode()
                     self.send_response(200)

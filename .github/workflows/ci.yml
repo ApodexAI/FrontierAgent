@@ -59,6 +59,26 @@ jobs:
           uv run pytest -q \
             -c benchmarks/frontierchallenge/pyproject.toml \
             benchmarks/frontierchallenge/tests
+          # check_public_leaks.py --allow-empty passes a framework-only snapshot,
+          # so the "payload stays on Hugging Face" rule needs its own assertion.
+          found=$(git ls-files 'benchmarks/frontierchallenge/tasks/**' | head -20)
+          if [ -n "$found" ]; then
+            echo "::error::task payload belongs on Hugging Face, not in Git:"
+            echo "$found"
+            exit 1
+          fi
+          echo "no tracked task payload"
+          uv run python - <<'PY'
+          import json
+          registry = json.load(open("benchmarks/frontierchallenge/registry.json"))
+          assert registry["n_tasks"] == len(registry["tasks"]) == 97, (
+              f'registry drifted: n_tasks={registry["n_tasks"]}, '
+              f'tasks={len(registry["tasks"])}, expected 97'
+          )
+          ids = {row["id"] for row in registry["tasks"]}
+          assert len(ids) == 97, f"registry has {97 - len(ids)} duplicate task id(s)"
+          print("public registry: 97 unique task commitments")
+          PY
           uv run python benchmarks/frontierchallenge/scripts/check_public_leaks.py \
             benchmarks/frontierchallenge --allow-empty
           uv run python benchmarks/frontierchallenge/scripts/check_restricted_software.py \

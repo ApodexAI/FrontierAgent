@@ -50,6 +50,13 @@ _CONTACT_UA_TEMPLATE = "FrontierAgent/1.0 (mailto:{email})"
 _ANON_CROSSREF_UA = "FrontierAgent/1.0"
 
 
+def _is_domain(hostname: str, domain: str) -> bool:
+    """Return whether *hostname* is *domain* or one of its subdomains."""
+    host = hostname.lower().rstrip(".")
+    allowed = domain.lower().rstrip(".")
+    return host == allowed or host.endswith("." + allowed)
+
+
 # ── URL extraction helpers ────────────────────────────────────────────────
 
 def extract_pmcid(url: str) -> str:
@@ -71,12 +78,18 @@ def extract_doi(url: str) -> str:
 
 def route_url(url: str) -> Route:
     """Classify URL for backend selection. Pure — no I/O."""
-    domain = urlparse(url).netloc
-    if "pmc.ncbi.nlm.nih.gov" in domain:
+    try:
+        parsed = urlparse(url)
+        domain = parsed.hostname or ""
+    except ValueError:
+        return "jina"
+    if parsed.scheme.lower() not in {"http", "https"}:
+        return "jina"
+    if _is_domain(domain, "pmc.ncbi.nlm.nih.gov"):
         return "pmc"
-    if "pubmed.ncbi.nlm.nih.gov" in domain:
+    if _is_domain(domain, "pubmed.ncbi.nlm.nih.gov"):
         return "pubmed"
-    if "biorxiv.org" in domain or "medrxiv.org" in domain:
+    if _is_domain(domain, "biorxiv.org") or _is_domain(domain, "medrxiv.org"):
         return "biorxiv"
     if domain in PAYWALL_DOMAINS:
         return "paywall"
@@ -93,7 +106,18 @@ def is_garbage_content(text: str) -> bool:
 
 def biorxiv_to_pdf(url: str) -> str:
     """Convert bioRxiv/medRxiv URL to full PDF URL. Returns empty if not applicable."""
-    if not ("biorxiv.org" in url or "medrxiv.org" in url):
+    try:
+        parsed = urlparse(url)
+        hostname = parsed.hostname or ""
+    except ValueError:
+        return ""
+    if (
+        parsed.scheme.lower() not in {"http", "https"}
+        or not (
+            _is_domain(hostname, "biorxiv.org")
+            or _is_domain(hostname, "medrxiv.org")
+        )
+    ):
         return ""
     clean = url.split("?")[0].split("#")[0].rstrip("/")
     if clean.endswith(".pdf"):

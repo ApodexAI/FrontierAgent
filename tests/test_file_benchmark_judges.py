@@ -37,6 +37,21 @@ def test_gdpval_requires_expected_deliverable_extension(tmp_path: Path) -> None:
     assert score_gdpval_outputs(tmp_path, target) == (0, 0.0)
 
 
+def test_widesearch_url_match_ignores_trailing_prose_punctuation() -> None:
+    pytest.importorskip("pandas")  # widesearch pulls the eval extras in at import
+    from benchmarks.public.judges.widesearch import _url_netlocs, metric_url_match
+
+    # A parenthesized or sentence-final URL used to carry ")"/"." into the netloc
+    # and so never matched its counterpart.
+    assert _url_netlocs("see (https://example.com)") == {"example.com"}
+    assert _url_netlocs("source: https://example.com.") == {"example.com"}
+    assert metric_url_match("see (https://example.com).", "https://example.com")[0] == 1.0
+
+    # Dots inside the URL body must survive — only trailing punctuation is cut.
+    assert _url_netlocs("https://a.example.com/x.html, next") == {"a.example.com"}
+    assert metric_url_match("https://a.com/x", "https://b.com/x")[0] == 0.0
+
+
 def test_rubric_json_parsers_tolerate_wrapping() -> None:
     assert _parse_result('result: {"result": 1, "reason": "ok"}') is True
     assert _parse_rubric_verdicts(

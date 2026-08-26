@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import logging
 from contextvars import ContextVar, Token
 from typing import Any
@@ -181,29 +180,24 @@ def summary_llm_candidates() -> list[dict[str, Any]]:
 
 
 def describe_candidates(candidates: list[dict[str, Any]]) -> str:
-    """Printable candidate list with credentials reduced to a fingerprint.
+    """Printable candidate list with credentials fully redacted.
 
     :func:`summary_llm_candidates` returns live API keys, so printing its result
     verbatim writes them into terminal scrollback, CI logs and pasted bug
     reports. Debug through this instead: it keeps what identifies a candidate
-    (provider, model, endpoint) and reduces the key to its length plus a
-    12-hex-digit sha256 prefix — enough to tell two keys apart, not enough to
-    use one.
+    (provider, model, endpoint) and reports only whether a key is configured.
+    No value derived from the credential is retained or logged.
     """
     if not candidates:
         return "(no summary LLM candidates)"
     lines: list[str] = []
     for index, cand in enumerate(candidates, 1):
         key = str(cand.get("api_key") or "")
-        fingerprint = (
-            f"len={len(key)} #{hashlib.sha256(key.encode()).hexdigest()[:12]}"
-            if key else "unset"
-        )
         lines.append(
             f"{index}. provider={cand.get('provider') or '?'}"
             f" model={cand.get('model') or '?'}"
             f" endpoint={cand.get('endpoint') or '?'}"
-            f" api_key={fingerprint}"
+            f" api_key={'set' if key else 'unset'}"
         )
     return "\n".join(lines)
 
