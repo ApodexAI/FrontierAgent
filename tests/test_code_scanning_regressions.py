@@ -59,16 +59,17 @@ def test_render_check_accepts_a_bom_anywhere_in_the_leading_run() -> None:
     assert not _looks_like_html_document("\ufeffplain text")
 
 
-def test_api_key_fingerprint_is_keyed_and_does_not_expose_the_key() -> None:
+def test_api_key_status_does_not_derive_or_expose_a_fingerprint() -> None:
     candidate = {
         "provider": "test",
         "model": "model",
         "endpoint": "https://example.test/v1",
         "api_key": "password-like-low-entropy-value",
     }
-    first = describe_candidates([candidate])
-    second = describe_candidates([candidate])
+    output = describe_candidates([candidate])
 
-    assert first == second
-    assert candidate["api_key"] not in first
-    assert "len=31 #" in first
+    assert candidate["api_key"] not in output
+    assert "api_key=set" in output
+    assert "len=" not in output
+    assert "#" not in output
+    assert "api_key=unset" in describe_candidates([{**candidate, "api_key": ""}])

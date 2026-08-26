@@ -2,10 +2,7 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import hmac
 import logging
-import secrets
 from contextvars import ContextVar, Token
 from typing import Any
 
@@ -24,7 +21,6 @@ FALLBACK_TRUNCATE = 20_000
 _MAX_RETRIES = 4
 _TRUNCATE_STEP = 40_960
 _REQUEST_TIMEOUT = 300
-_KEY_FINGERPRINT_SECRET = secrets.token_bytes(32)
 
 
 # ── Profile-driven override ───────────────────────────────────────────
@@ -184,30 +180,24 @@ def summary_llm_candidates() -> list[dict[str, Any]]:
 
 
 def describe_candidates(candidates: list[dict[str, Any]]) -> str:
-    """Printable candidate list with credentials reduced to a fingerprint.
+    """Printable candidate list with credentials fully redacted.
 
     :func:`summary_llm_candidates` returns live API keys, so printing its result
     verbatim writes them into terminal scrollback, CI logs and pasted bug
     reports. Debug through this instead: it keeps what identifies a candidate
-    (provider, model, endpoint) and reduces the key to its length plus a keyed,
-    process-local 12-hex-digit HMAC prefix — enough to tell two keys apart in
-    one run without enabling offline guesses from retained logs.
+    (provider, model, endpoint) and reports only whether a key is configured.
+    No value derived from the credential is retained or logged.
     """
     if not candidates:
         return "(no summary LLM candidates)"
     lines: list[str] = []
     for index, cand in enumerate(candidates, 1):
         key = str(cand.get("api_key") or "")
-        fingerprint = (
-            f"len={len(key)} #"
-            f"{hmac.digest(_KEY_FINGERPRINT_SECRET, key.encode(), hashlib.sha256).hex()[:12]}"
-            if key else "unset"
-        )
         lines.append(
             f"{index}. provider={cand.get('provider') or '?'}"
             f" model={cand.get('model') or '?'}"
             f" endpoint={cand.get('endpoint') or '?'}"
-            f" api_key={fingerprint}"
+            f" api_key={'set' if key else 'unset'}"
         )
     return "\n".join(lines)
 
