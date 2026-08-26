@@ -138,7 +138,7 @@ def metric_exact_match(response, target, criterion=None):
 
 
 def metric_url_match(response, target, criterion=None):
-    pat = re.compile(r"http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+")
+    pat = re.compile(r"https?://[^\s<>\"']+")
     rd = {urlparse(u).netloc for u in pat.findall(response)}
     td = {urlparse(u).netloc for u in pat.findall(target)}
     return (1.0, "match") if rd == td else (0.0, "no match")

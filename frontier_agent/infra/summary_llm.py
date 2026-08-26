@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import hmac
 import logging
+import secrets
 from contextvars import ContextVar, Token
 from typing import Any
 
@@ -22,6 +24,7 @@ FALLBACK_TRUNCATE = 20_000
 _MAX_RETRIES = 4
 _TRUNCATE_STEP = 40_960
 _REQUEST_TIMEOUT = 300
+_KEY_FINGERPRINT_SECRET = secrets.token_bytes(32)
 
 
 # ── Profile-driven override ───────────────────────────────────────────
@@ -186,9 +189,9 @@ def describe_candidates(candidates: list[dict[str, Any]]) -> str:
     :func:`summary_llm_candidates` returns live API keys, so printing its result
     verbatim writes them into terminal scrollback, CI logs and pasted bug
     reports. Debug through this instead: it keeps what identifies a candidate
-    (provider, model, endpoint) and reduces the key to its length plus a
-    12-hex-digit sha256 prefix — enough to tell two keys apart, not enough to
-    use one.
+    (provider, model, endpoint) and reduces the key to its length plus a keyed,
+    process-local 12-hex-digit HMAC prefix — enough to tell two keys apart in
+    one run without enabling offline guesses from retained logs.
     """
     if not candidates:
         return "(no summary LLM candidates)"
@@ -196,7 +199,8 @@ def describe_candidates(candidates: list[dict[str, Any]]) -> str:
     for index, cand in enumerate(candidates, 1):
         key = str(cand.get("api_key") or "")
         fingerprint = (
-            f"len={len(key)} #{hashlib.sha256(key.encode()).hexdigest()[:12]}"
+            f"len={len(key)} #"
+            f"{hmac.digest(_KEY_FINGERPRINT_SECRET, key.encode(), hashlib.sha256).hex()[:12]}"
             if key else "unset"
         )
         lines.append(

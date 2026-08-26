@@ -12,7 +12,6 @@ import filecmp
 import json
 import os
 import secrets
-import shlex
 import subprocess
 import sys
 import tempfile
@@ -118,33 +117,24 @@ def _read_macos_pasteboard(temp_dir: str) -> dict[str, Any]:
 
 
 def _path_text(text: str) -> list[str] | None:
-    """Return absolute existing paths represented by clipboard text."""
+    """Return local paths represented by explicit ``file://`` URLs.
+
+    Plain absolute-path text is deliberately not promoted to an attachment:
+    copied webpage or chat content must not be able to make the client stage a
+    readable host file merely because its text happens to name one.
+    """
     raw = text.strip()
     if not raw:
         return None
     lines = [line.strip() for line in raw.splitlines() if line.strip()]
-    if lines and all(line.startswith("file://") for line in lines):
-        candidates = []
-        for line in lines:
-            parsed = urlparse(line)
-            if parsed.scheme == "file":
-                candidates.append(unquote(parsed.path))
-    elif len(lines) > 1 and all(
-        Path(line.strip("'\"")).expanduser().is_absolute()
-        and Path(line.strip("'\"")).expanduser().exists()
-        for line in lines
-    ):
-        candidates = [line.strip("'\"") for line in lines]
-    else:
-        try:
-            candidates = shlex.split(raw)
-        except ValueError:
-            candidates = [line.strip() for line in raw.splitlines() if line.strip()]
-        # A single unescaped path may contain spaces. Prefer it when it exists.
-        if Path(raw).expanduser().is_absolute() and Path(raw).expanduser().exists():
-            candidates = [raw]
-    if not candidates:
+    if not lines or not all(line.startswith("file://") for line in lines):
         return None
+    candidates: list[str] = []
+    for line in lines:
+        parsed = urlparse(line)
+        if parsed.scheme != "file" or parsed.netloc not in {"", "localhost"}:
+            return None
+        candidates.append(unquote(parsed.path))
     resolved: list[str] = []
     for candidate in candidates:
         path = Path(candidate).expanduser()
@@ -230,8 +220,15 @@ class ClipboardBroker:
                     pasted_text = request.get("text") if isinstance(request, dict) else None
                     if pasted_text is not None and not isinstance(pasted_text, str):
                         raise ClipboardError("invalid pasted text")
-                    response = capture_macos_clipboard(
-                        broker.manager, pasted_text=pasted_text,
+                    # The bearer token is available to the container so it can
+                    # call this bridge. Never treat request data as a host path:
+                    # doing so would let container code copy arbitrary readable
+                    # host files into its attachment mount. Only a real macOS
+                    # pasteboard read may produce host file attachments.
+                    response = (
+                        ClipboardPaste("text", text=pasted_text)
+                        if pasted_text is not None
+                        else capture_macos_clipboard(broker.manager)
                     )
                     body = json.dumps(asdict(response)).encode()
                     self.send_response(200)
