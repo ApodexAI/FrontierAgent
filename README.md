@@ -340,10 +340,26 @@ with model cards and serving guidance.
 Cite the current release:
 
 ```bibtex
-@techreport{apodex11,
-  title  = {Apodex-1.1: Scaling Agentic Intelligence for Complex Work},
-  author = {Apodex Team},
-  year   = {2026}
+@article{apodex11,
+  title         = {Apodex-1.1: Scaling Agentic Intelligence for Complex Work},
+  author        = {Apodex Team},
+  year          = {2026},
+  eprint        = {2608.23283},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.AI},
+  url           = {https://arxiv.org/abs/2608.23283}
+}
+```
+
+```bibtex
+@misc{frontierchallenge,
+  title        = {FrontierChallenge: Evaluating Scientific Workflow Completion},
+  author       = {Su, Liangcai and Feng, Zhaopeng and Chen, Zhuo and Zhang, Zhen
+                  and Lin, Xiang and Li, Ruilin and Zhang, Handuo and Wang, Ning
+                  and Wen, Kailong and Guo, Yueqi and Xing, Feng and Guo, Yiling
+                  and Qian, Chenxiong and Du, Simon Shaolei and Bing, Lidong
+                  and Wang, Xinyu},
+  year         = {2026}
 }
 ```
 
@@ -360,3 +376,13 @@ For work that refers specifically to the previous generation:
 ## License
 
 Apache 2.0 — see [LICENSE](./LICENSE).
+
+## Star History
+
+<a href="https://github.com/ApodexAI/FrontierAgent/stargazers">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/ApodexAI/FrontierAgent/star-history/assets/star-history/star-history-dark.svg" />
+    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/ApodexAI/FrontierAgent/star-history/assets/star-history/star-history-light.svg" />
+    <img alt="Star History Chart" src="https://raw.githubusercontent.com/ApodexAI/FrontierAgent/star-history/assets/star-history/star-history-light.svg" />
+  </picture>
+</a>
