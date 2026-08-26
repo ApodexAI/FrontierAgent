@@ -3,9 +3,7 @@
     <img src="./assets/apodex_logo.jpeg" width="30%" alt="Apodex">
   </picture>
 </div>
-
----
-
+<hr>
 <br>
 
 <div align="center">
@@ -18,10 +16,10 @@
   <a href="https://x.com/Apodex_AI"><img alt="X" src="https://img.shields.io/badge/X-@Apodex__AI-000000?logo=x&logoColor=white"/></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/License-Apache_2.0-blue"/></a>
 </div>
-
+<br>
 <p align="center">
   <b><a href="https://www.apodex.com/blog/apodex-1.1-scaling-agentic-intelligence-for-complex-work">Tech Blog</a></b> ·
-  <b><a href="https://www.apodex.com/pdf/20260824">Tech Report</a></b>
+  <b><a href="https://arxiv.org/abs/2608.23283">Tech Report</a></b>
 </p>
 
 # FrontierAgent
