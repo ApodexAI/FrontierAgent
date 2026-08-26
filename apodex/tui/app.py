@@ -1027,6 +1027,10 @@ class FrontierAgentApp(App):
                 )
         elif result.kind == "text":
             self._insert_pasted_text(prompt, result.text)
+            if result.message:
+                # e.g. the container bridge cannot attach dropped file paths, so
+                # the paste stayed text — say why rather than leaving raw URLs.
+                self.notify(result.message, severity="warning")
         else:
             self.notify(result.message or "clipboard is empty or unsupported", severity="warning")
         self._focus_prompt()

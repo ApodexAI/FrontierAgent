@@ -116,12 +116,27 @@ def _read_macos_pasteboard(temp_dir: str) -> dict[str, Any]:
     return payload
 
 
+def _looks_like_file_urls(text: str) -> bool:
+    """Report whether every non-blank line is a ``file://`` URL, without touching disk.
+
+    Used where the text is untrusted and must not be resolved: a purely textual
+    check leaks nothing about which host paths exist.
+    """
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    return bool(lines) and all(line.startswith("file://") for line in lines)
+
+
 def _path_text(text: str) -> list[str] | None:
     """Return local paths represented by explicit ``file://`` URLs.
 
     Plain absolute-path text is deliberately not promoted to an attachment:
     copied webpage or chat content must not be able to make the client stage a
     readable host file merely because its text happens to name one.
+
+    Only ever called on input the local user produced — a real pasteboard read,
+    or a paste into a TUI running natively on the host. Text arriving over the
+    broker is container-controlled and must not reach this function; see
+    ``_broker_text_paste``.
     """
     raw = text.strip()
     if not raw:
@@ -147,7 +162,12 @@ def _path_text(text: str) -> list[str] | None:
 def capture_macos_clipboard(
     manager: AttachmentManager, *, pasted_text: str | None = None,
 ) -> ClipboardPaste:
-    """Capture Finder files, an image, a path string, or ordinary text."""
+    """Capture Finder files, an image, a path string, or ordinary text.
+
+    ``pasted_text`` is trusted here: the only callers are the local user's own
+    paste, either natively or via the broker's pasteboard read. The broker's
+    request path deliberately does not route request text through this function.
+    """
     if pasted_text is not None:
         paths = _path_text(pasted_text)
         if paths is None:
@@ -194,6 +214,23 @@ def capture_macos_clipboard(
         raise ClipboardError(str(payload.get("message") or "unsupported clipboard content"))
 
 
+def _broker_text_paste(pasted_text: str) -> ClipboardPaste:
+    """Wrap container-supplied paste text, explaining a gesture the bridge drops.
+
+    Dragging a file into the terminal pastes ``file://`` URLs, which the native
+    TUI stages as an attachment. Over the bridge the same text is indistinguishable
+    from a request forged by container code, so it stays text — but the user gets
+    told why, plus the Finder-copy route that does work through the bridge.
+    """
+    message = (
+        "dropped file paths cannot be attached through the container clipboard "
+        "bridge; copy the file in Finder (Cmd-C) and paste again to attach it"
+        if _looks_like_file_urls(pasted_text)
+        else ""
+    )
+    return ClipboardPaste("text", text=pasted_text, message=message)
+
+
 class ClipboardBroker:
     """Loopback-only host service used by the macOS Docker TUI."""
 
@@ -226,7 +263,7 @@ class ClipboardBroker:
                     # host files into its attachment mount. Only a real macOS
                     # pasteboard read may produce host file attachments.
                     response = (
-                        ClipboardPaste("text", text=pasted_text)
+                        _broker_text_paste(pasted_text)
                         if pasted_text is not None
                         else capture_macos_clipboard(broker.manager)
                     )

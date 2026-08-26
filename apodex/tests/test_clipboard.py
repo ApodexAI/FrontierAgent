@@ -10,6 +10,7 @@ from apodex.clipboard import (
     _BROKER_URL_ENV,
     ClipboardBroker,
     ClipboardPaste,
+    _looks_like_file_urls,
     _path_text,
     capture_macos_clipboard,
     paste_from_clipboard,
@@ -112,3 +113,42 @@ def test_broker_never_resolves_request_text_as_a_host_path(
 
     assert result == ClipboardPaste("text", text=str(source))
     assert manager.list() == []
+
+
+def test_looks_like_file_urls_is_textual_only(tmp_path: Path) -> None:
+    missing = tmp_path / "absent.pdf"
+
+    # No disk access: a path that does not exist still reads as a file URL, so
+    # the broker cannot be used as an "does this host file exist" oracle.
+    assert _looks_like_file_urls(missing.as_uri()) is True
+    assert _looks_like_file_urls(f"{missing.as_uri()}\n{tmp_path.as_uri()}") is True
+    assert _looks_like_file_urls(str(missing)) is False
+    assert _looks_like_file_urls("ordinary clipboard text") is False
+    assert _looks_like_file_urls("") is False
+
+
+def test_broker_explains_a_dropped_file_instead_of_silently_pasting_text(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    source = tmp_path / "claim.pdf"
+    source.write_bytes(b"claim")
+    manager = _manager(monkeypatch, tmp_path)
+    try:
+        broker = ClipboardBroker(manager)
+    except PermissionError:
+        pytest.skip("test sandbox does not allow loopback listeners")
+    broker.start()
+    monkeypatch.setenv(_BROKER_URL_ENV, f"http://127.0.0.1:{broker.port}")
+    monkeypatch.setenv(_BROKER_TOKEN_ENV, broker.token)
+    try:
+        dropped = paste_from_clipboard(manager, pasted_text=source.as_uri())
+        ordinary = paste_from_clipboard(manager, pasted_text="just text")
+    finally:
+        broker.close()
+
+    # The same gesture attaches natively, so the bridge says why it could not.
+    assert dropped.kind == "text"
+    assert dropped.text == source.as_uri()
+    assert "Finder" in dropped.message
+    assert manager.list() == []
+    assert ordinary == ClipboardPaste("text", text="just text")

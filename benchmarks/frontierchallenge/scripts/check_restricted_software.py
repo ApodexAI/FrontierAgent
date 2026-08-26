@@ -9,12 +9,13 @@ contract documented in ``docs/providers/orca.md``.
 """
 from __future__ import annotations
 
+import argparse
 import re
 import subprocess
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_ROOT = Path(__file__).resolve().parents[1]
 
 FORBIDDEN_PATHS = {
     "shared_images/Dockerfile.orca",
@@ -35,25 +36,39 @@ INSTALLER_NAME = re.compile(
 )
 
 
-def tracked_files() -> list[str]:
+def tracked_files(root: Path) -> list[str]:
     try:
         out = subprocess.check_output(
-            ["git", "ls-files", "-z"], cwd=ROOT, stderr=subprocess.DEVNULL
+            ["git", "ls-files", "-z"], cwd=root, stderr=subprocess.DEVNULL
         ).decode("utf-8", errors="surrogateescape")
         return [p for p in out.split("\0") if p]
     except subprocess.CalledProcessError:
         # A history-free public export intentionally has no .git directory.
         # Audit every materialized file there instead of skipping the gate.
         return sorted(
-            path.relative_to(ROOT).as_posix()
-            for path in ROOT.rglob("*")
+            path.relative_to(root).as_posix()
+            for path in root.rglob("*")
             if path.is_file()
         )
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "root",
+        nargs="?",
+        default=DEFAULT_ROOT,
+        type=Path,
+        help="tree to audit (default: the FrontierChallenge root beside this script)",
+    )
+    args = parser.parse_args(argv)
+    root: Path = args.root.resolve()
+    if not root.is_dir():
+        print(f"not a directory: {root}", file=sys.stderr)
+        return 2
+
     problems: list[str] = []
-    tracked = tracked_files()
+    tracked = tracked_files(root)
 
     for relative in tracked:
         lower = relative.lower()
@@ -64,7 +79,7 @@ def main() -> int:
         if lower.startswith("shared_images/") and "orca" in Path(lower).name:
             problems.append(f"ORCA build artifact must not live in shared_images: {relative}")
 
-        path = ROOT / relative
+        path = root / relative
         if not path.is_file() or path.suffix == ".fcref":
             continue
         try:

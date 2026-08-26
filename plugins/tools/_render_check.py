@@ -41,6 +41,12 @@ class _VisibleBodyParser(HTMLParser):
     """Collect visible body text while ignoring script/style/template payloads."""
 
     _HIDDEN = frozenset({"script", "style", "template", "noscript", "svg"})
+    # HTMLParser never emits handle_endtag for a bare void element, so pushing
+    # one onto the mount stack would leak a frame and desync every later pop.
+    _VOID = frozenset({
+        "area", "base", "br", "col", "embed", "hr", "img", "input",
+        "link", "meta", "param", "source", "track", "wbr",
+    })
 
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
@@ -61,6 +67,10 @@ class _VisibleBodyParser(HTMLParser):
         if self._mount_stack:
             mount_tag, candidate, _ = self._mount_stack[-1]
             self._mount_stack[-1] = (mount_tag, candidate, True)
+        if name in self._VOID:
+            # Already recorded as content for the enclosing mount above; a void
+            # element has no children and never closes, so it gets no frame.
+            return
         attr_map = {key.lower(): value or "" for key, value in attrs}
         marker = f"{attr_map.get('id', '')} {attr_map.get('class', '')}".lower()
         is_mount = name in {"div", "main", "section"} and any(
@@ -75,6 +85,11 @@ class _VisibleBodyParser(HTMLParser):
 
     def handle_endtag(self, tag: str) -> None:
         name = tag.lower()
+        if name in self._VOID:
+            # Balances handle_starttag: no frame was pushed, so pop nothing.
+            # Covers both a stray ``</br>`` and the endtag half that
+            # handle_startendtag synthesizes for ``<img/>``.
+            return
         if self._mount_stack:
             mount_tag, candidate, has_content = self._mount_stack.pop()
             if mount_tag == name and candidate and not has_content:
@@ -115,10 +130,14 @@ def _visible_body_text(content: str) -> str:
 
 def _looks_like_html_document(content: str) -> bool:
     """Recognize an HTML document prefix without backtracking over comments."""
-    position = 1 if content.startswith("\ufeff") else 0
+    position = 0
     length = len(content)
     while position < length:
-        while position < length and content[position].isspace():
+        # A BOM may repeat or trail whitespace when documents are concatenated,
+        # so skip it wherever it appears in the leading run, not just at index 0.
+        while position < length and (
+            content[position].isspace() or content[position] == "\ufeff"
+        ):
             position += 1
         if content.startswith("<!--", position):
             end = content.find("-->", position + 4)

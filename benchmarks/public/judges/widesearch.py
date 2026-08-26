@@ -137,10 +137,26 @@ def metric_exact_match(response, target, criterion=None):
     return (1.0, "match") if response.lower() == target.lower() else (0.0, "no match")
 
 
+# Deliberately permissive so IDN/non-ASCII hosts and paths are captured too;
+# prose punctuation that a URL cannot end with is trimmed afterwards instead of
+# being excluded from the class (a URL body legitimately contains "." and ",").
+_URL_RE = re.compile(r"https?://[^\s<>\"']+")
+_URL_TRAILING_PUNCTUATION = ".,;:!?'\")]}>"
+
+
+def _url_netlocs(text):
+    """Collect the hostnames of every URL in ``text``, ignoring prose punctuation."""
+    found = set()
+    for raw in _URL_RE.findall(text):
+        trimmed = raw.rstrip(_URL_TRAILING_PUNCTUATION)
+        if trimmed:
+            found.add(urlparse(trimmed).netloc)
+    return found
+
+
 def metric_url_match(response, target, criterion=None):
-    pat = re.compile(r"https?://[^\s<>\"']+")
-    rd = {urlparse(u).netloc for u in pat.findall(response)}
-    td = {urlparse(u).netloc for u in pat.findall(target)}
+    rd = _url_netlocs(response)
+    td = _url_netlocs(target)
     return (1.0, "match") if rd == td else (0.0, "no match")
 
 
