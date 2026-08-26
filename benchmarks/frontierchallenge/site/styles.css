@@ -13,9 +13,11 @@
 }
 
 * { box-sizing: border-box; }
-html { scroll-behavior: smooth; }
+html { overflow-x: hidden; overflow-x: clip; scroll-behavior: smooth; }
 body {
   margin: 0;
+  overflow-x: hidden;
+  overflow-x: clip;
   background: var(--paper);
   color: var(--ink);
   font-family: var(--sans);
@@ -38,14 +40,15 @@ main { width: min(1180px, calc(100% - 48px)); margin: 0 auto; }
   backdrop-filter: blur(14px) saturate(1.08);
   border-bottom: 1px solid var(--line);
 }
-.wordmark { display: inline-flex; align-items: center; gap: 9px; color: var(--ink); font-weight: 650; letter-spacing: -.015em; font-size: 18px; }
+.wordmark { display: inline-flex; min-width: 0; flex: 1 1 auto; align-items: center; gap: 9px; color: var(--ink); font-weight: 650; letter-spacing: -.015em; font-size: 18px; white-space: nowrap; }
+.wordmark > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wordmark-mark {
   width: 21px;
   height: 21px;
   display: inline-block;
   object-fit: contain;
 }
-nav { display: flex; gap: 25px; align-items: center; }
+nav { display: flex; flex: 0 0 auto; gap: 25px; align-items: center; }
 nav a { color: var(--muted); text-decoration: none; font-size: 16px; }
 nav a:hover, .text-link:hover { color: var(--blue); }
 nav a[aria-current="page"] { color: var(--ink); font-weight: 650; }
@@ -65,7 +68,7 @@ h1 { font-size: clamp(46px, 5.4vw, 64px); line-height: 1.08; letter-spacing: .01
 .resource-links i { font-size: 17px; font-style: normal; }
 
 .leaderboard { background: var(--white); border: 1px solid var(--line); }
-.table-scroll { overflow-x: auto; }
+.table-scroll { overflow-x: auto; overscroll-behavior-inline: contain; -webkit-overflow-scrolling: touch; }
 table { width: 100%; border-collapse: collapse; min-width: 900px; table-layout: fixed; font-family: var(--mono); }
 .col-rank { width: 8%; }
 .col-model { width: 24%; }
@@ -104,7 +107,7 @@ tbody tr:hover .rate-ring::after, tbody tr.is-leading:hover .rate-ring::after { 
 .case-heading .section-label { margin-bottom: 13px; }
 .case-heading h2 { margin-bottom: 0; font-size: clamp(32px, 3.5vw, 46px); line-height: 1.1; white-space: nowrap; }
 .case-card { display: grid; min-width: 0; overflow: hidden; border: 1px solid var(--line); background: var(--white); color: inherit; text-decoration: none; transition: transform .28s cubic-bezier(.2, .72, .25, 1), border-color .22s ease, box-shadow .28s ease; }
-.case-reel-viewport { width: 100vw; height: 457px; overflow: hidden; padding: 7px 0 12px; margin: -7px calc(50% - 50vw) 0; -webkit-mask-image: linear-gradient(90deg, transparent 0, rgba(0,0,0,.22) 3%, #000 8%, #000 92%, rgba(0,0,0,.22) 97%, transparent 100%); mask-image: linear-gradient(90deg, transparent 0, rgba(0,0,0,.22) 3%, #000 8%, #000 92%, rgba(0,0,0,.22) 97%, transparent 100%); }
+.case-reel-viewport { contain: layout paint; width: 100vw; height: 457px; overflow: hidden; padding: 7px 0 12px; margin: -7px calc(50% - 50vw) 0; -webkit-mask-image: linear-gradient(90deg, transparent 0, rgba(0,0,0,.22) 3%, #000 8%, #000 92%, rgba(0,0,0,.22) 97%, transparent 100%); mask-image: linear-gradient(90deg, transparent 0, rgba(0,0,0,.22) 3%, #000 8%, #000 92%, rgba(0,0,0,.22) 97%, transparent 100%); }
 .case-reel { display: flex; width: max-content; height: 100%; align-items: flex-start; gap: 18px; will-change: transform; }
 .case-reel .case-card { flex: 0 0 auto; height: 438px; grid-template-rows: 255px 183px; }
 .case-card-wide { width: 440px; }
@@ -301,15 +304,31 @@ tbody tr:hover .rate-ring::after, tbody tr.is-leading:hover .rate-ring::after { 
 @media (max-width: 700px) {
   main { width: min(100% - 32px, 1180px); }
   .site-header { height: 52px; padding: 0 16px; }
-  nav { gap: 14px; }
-  .wordmark { font-size: 15px; }
+  nav { gap: 14px; margin-left: 12px; }
+  .wordmark { gap: 7px; font-size: 15px; }
+  .wordmark-mark { width: 19px; height: 19px; }
   nav a { font-size: 13px; }
   .leaderboard-intro { padding: 44px 0 20px; }
   .leaderboard-page .leaderboard-intro { padding-top: 34px; }
+  .leaderboard-intro h1 { font-size: clamp(33px, 9.2vw, 40px); letter-spacing: .006em; }
   .intro-row { display: block; }
   .results-note { display: none; }
-  .resource-links { justify-content: stretch; gap: 8px; }
-  .resource-links a { flex: 1 1 calc(50% - 4px); min-width: 0; }
+  .resource-links { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+  .resource-links a { min-width: 0; height: 34px; gap: 5px; padding: 0 5px; }
+  .resource-links span { overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+  .resource-links i { font-size: 15px; }
+  table { min-width: 880px; }
+  .col-model { width: 27%; }
+  .col-harness { width: 27%; }
+  .col-pass-rate { width: 23%; }
+  .col-release { width: 15%; }
+  th, td { height: 40px; padding: 0 14px; font-size: 14px; }
+  th { font-size: 13px; }
+  th:first-child, td:first-child { padding-left: 16px; }
+  .model-label { gap: 8px; }
+  .model-label img { width: 19px; height: 19px; flex-basis: 19px; }
+  .table-caption { padding: 8px 14px 9px; font-size: 11px; line-height: 1.45; white-space: normal; }
+  .caption-configurations { display: none; }
   .case-showcase { margin-top: 52px; }
   .case-heading h2 { white-space: normal; }
   .case-reel-viewport { height: 528px; }
@@ -325,6 +344,7 @@ tbody tr:hover .rate-ring::after, tbody tr.is-leading:hover .rate-ring::after { 
   .case-fact + .case-fact { border-top: 1px solid var(--line); }
   .case-figure { margin-right: -4px; margin-left: -4px; padding: 7px; }
   .case-back { margin-bottom: 26px; }
+  .case-document-intro h1 { font-size: clamp(36px, 10vw, 40px); }
   .case-visual-board { gap: 16px; padding: 18px; }
   .visual-board-heading { padding-bottom: 16px; }
   .visual-board-heading span { font-size: 22px; }
@@ -356,8 +376,12 @@ tbody tr:hover .rate-ring::after, tbody tr.is-leading:hover .rate-ring::after { 
   .footer-main { grid-template-columns: 1fr; gap: 40px; padding: 0; }
   .footer-brand { min-height: 145px; }
   .footer-nav { grid-template-columns: repeat(2, 1fr); gap: 36px 24px; }
-  .footer-bottom { align-items: flex-start; gap: 24px; }
-  .footer-socials { flex-wrap: wrap; justify-content: flex-end; }
+  .footer-bottom { align-items: flex-start; flex-direction: column; gap: 18px; }
+  .footer-socials { flex-wrap: wrap; justify-content: flex-start; }
+}
+
+@media (max-width: 380px) {
+  .resource-links span { font-size: 12px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
