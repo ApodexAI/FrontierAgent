@@ -379,10 +379,10 @@ Apache 2.0 — see [LICENSE](./LICENSE).
 
 ## Star History
 
-<a href="https://star-history.com/#ApodexAI/FrontierAgent&Date">
+<a href="https://github.com/ApodexAI/FrontierAgent/stargazers">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=ApodexAI/FrontierAgent&type=Date&theme=dark" />
-    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=ApodexAI/FrontierAgent&type=Date" />
-    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=ApodexAI/FrontierAgent&type=Date" />
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/ApodexAI/FrontierAgent/star-history/assets/star-history/star-history-dark.svg" />
+    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/ApodexAI/FrontierAgent/star-history/assets/star-history/star-history-light.svg" />
+    <img alt="Star History Chart" src="https://raw.githubusercontent.com/ApodexAI/FrontierAgent/star-history/assets/star-history/star-history-light.svg" />
   </picture>
 </a>
