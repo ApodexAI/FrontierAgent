@@ -5,8 +5,6 @@
 </div>
 <hr>
 <br>
-<div align="center" style="line-height:1">
-
 
 <div align="center">
   <a href="https://www.apodex.ai"><img alt="Online Service" src="https://img.shields.io/badge/🤖%20Online_Service-Apodex_1.1-1783ff"/></a>
