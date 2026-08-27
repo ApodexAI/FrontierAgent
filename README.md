@@ -37,12 +37,15 @@ The same workflow engine powers the benchmark runner used to evaluate Apodex
 models. The framework, tools, workflows, and evaluation layer remain separate,
 so each can be reused independently.
 
-> **Want to try FrontierAgent without hosting a model?**
+> [!IMPORTANT]
+> ### 🚀 Try FrontierAgent on the Apodex API — free for the next two weeks!
 >
-> Apodex-1.1 is available through the
-> **[Apodex API Platform](https://platform.apodex.ai/)**. Get an API key,
-> connect its OpenAI-compatible endpoint, and start running FrontierAgent in
-> minutes.
+> **No model hosting required.** Get an API key, connect to the OpenAI-compatible
+> Apodex-1.1 endpoint, and start running FrontierAgent in minutes.
+>
+> **[→ Start building for free at platform.apodex.ai](https://platform.apodex.ai/)**
+>
+> ⏳ This is a limited-time offer—come try it and let us know what you build!
 
 New here? Use the **[documentation index](docs/README.md)** to find the right
 installation, SGLang, workflow, evaluation, or developer guide.
