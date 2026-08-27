@@ -7,7 +7,7 @@ explicitly colourless output.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, MutableMapping
 from dataclasses import dataclass
 
 
@@ -21,6 +21,21 @@ class TerminalUI:
     reason: str
     colors: int = 16777216
     color_warning: str = ""
+
+
+def configure_terminal_keyboard(environ: MutableMapping[str, str]) -> None:
+    """Select a safe Textual keyboard protocol for the host terminal.
+
+    iTerm2 currently drops input-method commits after Textual enables Kitty
+    keyboard reporting.  Prefer working text input there until the terminal can
+    reliably report associated text.  An explicitly supplied value wins; an
+    empty value therefore remains an escape hatch for testing future versions.
+    """
+    if (
+        environ.get("TERM_PROGRAM", "").strip() == "iTerm.app"
+        and "TEXTUAL_DISABLE_KITTY_KEY" not in environ
+    ):
+        environ["TEXTUAL_DISABLE_KITTY_KEY"] = "1"
 
 
 def detect_color_depth(environ: Mapping[str, str]) -> int:
@@ -105,4 +120,9 @@ def resolve_terminal_ui(
     )
 
 
-__all__ = ["TerminalUI", "detect_color_depth", "resolve_terminal_ui"]
+__all__ = [
+    "TerminalUI",
+    "configure_terminal_keyboard",
+    "detect_color_depth",
+    "resolve_terminal_ui",
+]

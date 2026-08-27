@@ -33,7 +33,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def terminal_env(environ: Mapping[str, str]) -> list[str]:
-    """Return ``-e`` args carrying the host terminal's colour capability inward.
+    """Return ``-e`` args carrying the host terminal contract inward.
 
     Docker sets ``TERM=xterm`` inside a ``-it`` container and forwards no
     ``COLORTERM`` at all. Rich and Textual read exactly those two variables, and
@@ -58,6 +58,16 @@ def terminal_env(environ: Mapping[str, str]) -> list[str]:
         args += ["-e", f"COLORTERM={color_term}"]
     elif not term.endswith(("-256color", "-truecolor", "-direct")):
         args += ["-e", "COLORTERM=truecolor"]
+    # Keep host terminal identity available for compatibility decisions in
+    # Docker on every OS, and preserve a Textual keyboard override chosen by
+    # the host CLI or supplied explicitly by the user.
+    for name in (
+        "TERM_PROGRAM",
+        "TERM_PROGRAM_VERSION",
+        "TEXTUAL_DISABLE_KITTY_KEY",
+    ):
+        if name in environ:
+            args += ["-e", f"{name}={environ[name]}"]
     return args
 
 

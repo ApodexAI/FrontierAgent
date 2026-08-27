@@ -31,6 +31,37 @@ def test_cli_accepts_repeatable_inputs() -> None:
     assert args.input == ["a.pdf", "b.png"]
 
 
+def test_iterm_disables_textual_kitty_keyboard_by_default() -> None:
+    from apodex.terminal import configure_terminal_keyboard
+
+    environ = {"TERM_PROGRAM": "iTerm.app"}
+    configure_terminal_keyboard(environ)
+
+    assert environ["TEXTUAL_DISABLE_KITTY_KEY"] == "1"
+
+
+def test_keyboard_fallback_leaves_other_terminals_unchanged() -> None:
+    from apodex.terminal import configure_terminal_keyboard
+
+    environ = {"TERM_PROGRAM": "Apple_Terminal"}
+    configure_terminal_keyboard(environ)
+
+    assert "TEXTUAL_DISABLE_KITTY_KEY" not in environ
+
+
+@pytest.mark.parametrize("explicit", ["", "1", "custom"])
+def test_keyboard_fallback_preserves_an_explicit_user_value(explicit) -> None:
+    from apodex.terminal import configure_terminal_keyboard
+
+    environ = {
+        "TERM_PROGRAM": "iTerm.app",
+        "TEXTUAL_DISABLE_KITTY_KEY": explicit,
+    }
+    configure_terminal_keyboard(environ)
+
+    assert environ["TEXTUAL_DISABLE_KITTY_KEY"] == explicit
+
+
 @pytest.mark.parametrize(
     ("stdin_tty", "stdout_tty", "one_shot", "no_tui", "theme", "env", "use_tui"),
     [
@@ -188,3 +219,45 @@ def test_container_still_honours_an_explicitly_dumb_terminal() -> None:
 
     assert terminal_env({"TERM": "dumb"}) == ["-e", "TERM=dumb"]
     assert "COLORTERM=truecolor" not in terminal_env({"TERM": "dumb"})
+
+
+def test_container_receives_terminal_identity_and_keyboard_override() -> None:
+    from apodex.docker import terminal_env
+    from apodex.terminal import configure_terminal_keyboard
+
+    host = {
+        "TERM": "xterm-256color",
+        "TERM_PROGRAM": "iTerm.app",
+        "TERM_PROGRAM_VERSION": "3.6.11",
+    }
+    configure_terminal_keyboard(host)
+    args = terminal_env(host)
+    passed = dict(
+        pair.split("=", 1)
+        for flag, pair in zip(args[::2], args[1::2], strict=False)
+        if flag == "-e"
+    )
+
+    assert passed["TERM_PROGRAM"] == "iTerm.app"
+    assert passed["TERM_PROGRAM_VERSION"] == "3.6.11"
+    assert passed["TEXTUAL_DISABLE_KITTY_KEY"] == "1"
+
+
+def test_explicit_keyboard_override_reaches_docker_on_other_hosts() -> None:
+    from apodex.docker import terminal_env
+
+    args = terminal_env({
+        "TERM": "xterm-256color",
+        "TERM_PROGRAM": "WezTerm",
+        "TERM_PROGRAM_VERSION": "20240203",
+        "TEXTUAL_DISABLE_KITTY_KEY": "1",
+    })
+    passed = dict(
+        pair.split("=", 1)
+        for flag, pair in zip(args[::2], args[1::2], strict=False)
+        if flag == "-e"
+    )
+
+    assert passed["TERM_PROGRAM"] == "WezTerm"
+    assert passed["TERM_PROGRAM_VERSION"] == "20240203"
+    assert passed["TEXTUAL_DISABLE_KITTY_KEY"] == "1"
