@@ -148,12 +148,16 @@ scientific software retains its own license.
 }
 
 @misc{frontierchallenge,
-  title        = {FrontierChallenge: Evaluating Scientific Workflow Completion},
-  author       = {Su, Liangcai and Feng, Zhaopeng and Chen, Zhuo and Zhang, Zhen
-                  and Lin, Xiang and Li, Ruilin and Zhang, Handuo and Wang, Ning
-                  and Wen, Kailong and Guo, Yueqi and Xing, Feng and Guo, Yiling
-                  and Qian, Chenxiong and Du, Simon Shaolei and Bing, Lidong
-                  and Wang, Xinyu},
-  year         = {2026}
+  title         = {FrontierChallenge: Evaluating Scientific Workflow Completion},
+  author        = {Liangcai Su and Zhaopeng Feng and Zhuo Chen and Zhen Zhang
+                   and Xiang Lin and Ruilin Li and Handuo Zhang and Ning Wang
+                   and Kailong Wen and Yueqi Guo and Feng Xing and Yiling Guo
+                   and Chenxiong Qian and Simon Shaolei Du and Lidong Bing
+                   and Xinyu Wang},
+  year          = {2026},
+  eprint        = {2608.24979},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.AI},
+  url           = {https://arxiv.org/abs/2608.24979}
 }
 ```
