@@ -58,9 +58,9 @@ def terminal_env(environ: Mapping[str, str]) -> list[str]:
         args += ["-e", f"COLORTERM={color_term}"]
     elif not term.endswith(("-256color", "-truecolor", "-direct")):
         args += ["-e", "COLORTERM=truecolor"]
-    # The default macOS launch re-executes inside Docker.  Keep terminal
-    # identity available for compatibility decisions there, and preserve the
-    # Textual keyboard override chosen by the host CLI or supplied by the user.
+    # Keep host terminal identity available for compatibility decisions in
+    # Docker on every OS, and preserve a Textual keyboard override chosen by
+    # the host CLI or supplied explicitly by the user.
     for name in (
         "TERM_PROGRAM",
         "TERM_PROGRAM_VERSION",

@@ -241,3 +241,23 @@ def test_container_receives_terminal_identity_and_keyboard_override() -> None:
     assert passed["TERM_PROGRAM"] == "iTerm.app"
     assert passed["TERM_PROGRAM_VERSION"] == "3.6.11"
     assert passed["TEXTUAL_DISABLE_KITTY_KEY"] == "1"
+
+
+def test_explicit_keyboard_override_reaches_docker_on_other_hosts() -> None:
+    from apodex.docker import terminal_env
+
+    args = terminal_env({
+        "TERM": "xterm-256color",
+        "TERM_PROGRAM": "WezTerm",
+        "TERM_PROGRAM_VERSION": "20240203",
+        "TEXTUAL_DISABLE_KITTY_KEY": "1",
+    })
+    passed = dict(
+        pair.split("=", 1)
+        for flag, pair in zip(args[::2], args[1::2], strict=False)
+        if flag == "-e"
+    )
+
+    assert passed["TERM_PROGRAM"] == "WezTerm"
+    assert passed["TERM_PROGRAM_VERSION"] == "20240203"
+    assert passed["TEXTUAL_DISABLE_KITTY_KEY"] == "1"
