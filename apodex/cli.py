@@ -303,6 +303,12 @@ async def _amain(argv: list[str] | None = None) -> int:
     # owned by TerminalSession._authorize_workspace.)
     _load_env()
 
+    # Textual's Kitty keyboard negotiation drops IME commits in iTerm2.  Set
+    # the compatibility fallback before either starting the native TUI or
+    # constructing the Docker environment for the default macOS path.
+    from apodex.terminal import configure_terminal_keyboard
+    configure_terminal_keyboard(os.environ)
+
     if args.cwd:
         try:
             os.chdir(args.cwd)
