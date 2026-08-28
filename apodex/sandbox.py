@@ -211,7 +211,7 @@ def set_active_strategy(strategy: Strategy) -> None:
 
 # ── execution ────────────────────────────────────────────────────────────
 
-_bwrap_sandbox = None  # one jail per process; commands are cheap, setup is not
+_bwrap_sandbox: tuple[str, Any] | None = None  # one-entry cache keyed by workspace
 
 
 def _get_bwrap_sandbox(cwd: str) -> Any:
@@ -223,11 +223,14 @@ def _get_bwrap_sandbox(cwd: str) -> Any:
     into it.
     """
     global _bwrap_sandbox
-    if _bwrap_sandbox is None:
+    real = str(Path(cwd).expanduser().resolve())
+    if _bwrap_sandbox is None or _bwrap_sandbox[0] != real:
         from plugins.tools._sandbox import BwrapSandbox
-        real = str(Path(cwd).expanduser().resolve())
-        _bwrap_sandbox = BwrapSandbox(workspace=real, binds=((real, real, False),))
-    return _bwrap_sandbox
+        sandbox = BwrapSandbox(workspace=real, binds=((real, real, False),))
+        if _bwrap_sandbox is not None:
+            _bwrap_sandbox[1].kill()
+        _bwrap_sandbox = (real, sandbox)
+    return _bwrap_sandbox[1]
 
 
 async def run_shell(

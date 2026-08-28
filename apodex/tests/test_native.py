@@ -4,7 +4,7 @@ import asyncio
 import os
 from pathlib import Path
 
-from apodex import cli, docker
+from apodex import cli, docker, sandbox
 from apodex.native import prepare_native_runtime
 from apodex.sandbox import BWRAP, CONTAINER, NATIVE, Strategy, resolve_strategy
 from plugins.tools._sandbox import resolve_runtime_path
@@ -166,6 +166,37 @@ def test_configured_bwrap_backend_remains_explicit(monkeypatch) -> None:
 
     assert strategy.name == BWRAP
     assert strategy.reason == "SANDBOX_BACKEND=bwrap"
+
+
+def test_bwrap_sandbox_rebuilds_when_workspace_changes(
+    tmp_path, monkeypatch,
+) -> None:
+    class FakeBwrapSandbox:
+        def __init__(self, *, workspace, binds):
+            self.workspace = workspace
+            self.binds = binds
+            self.killed = False
+
+        def kill(self):
+            self.killed = True
+
+    first_workspace = tmp_path / "first"
+    second_workspace = tmp_path / "second"
+    first_workspace.mkdir()
+    second_workspace.mkdir()
+    monkeypatch.setattr("plugins.tools._sandbox.BwrapSandbox", FakeBwrapSandbox)
+    monkeypatch.setattr(sandbox, "_bwrap_sandbox", None)
+
+    first = sandbox._get_bwrap_sandbox(str(first_workspace))
+    same = sandbox._get_bwrap_sandbox(str(first_workspace / ".." / "first"))
+    second = sandbox._get_bwrap_sandbox(str(second_workspace))
+
+    assert same is first
+    assert second is not first
+    assert first.killed is True
+    assert second.killed is False
+    assert second.workspace == str(second_workspace.resolve())
+    assert second.binds == ((str(second_workspace.resolve()),) * 2 + (False,),)
 
 
 def test_macos_falls_back_to_native_when_docker_is_unavailable(
