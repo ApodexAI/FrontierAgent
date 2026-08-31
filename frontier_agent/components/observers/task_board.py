@@ -16,7 +16,11 @@ BusTaskResolver = Callable[[Any], str | None]
 class TaskBoardObserver(BaseObserver):
     """Re-inject a non-empty task board after a configurable cooldown."""
 
-    critical = False
+    # This observer returns an Intervention.  Non-critical observer hooks are
+    # fire-and-forget and their return values are deliberately not collected by
+    # notify_observers, so this must remain critical for reminders to reach the
+    # next LLM turn.
+    critical = True
 
     def __init__(
         self,
