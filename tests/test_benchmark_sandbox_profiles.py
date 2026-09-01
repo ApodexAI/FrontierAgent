@@ -92,6 +92,30 @@ def test_book_policy_override_wins_both_ways():
     assert resolve_closed_book("browsecomp", True) is True    # --no-web
 
 
+def test_runner_does_not_invert_the_web_flags() -> None:
+    """``--no-web`` must reach the workers as closed-book, and vice versa.
+
+    ``resolve_closed_book`` is polarity-correct on its own, so its unit tests
+    above stay green even when the runner hands it an un-negated *open-book*
+    flag. That is exactly how the flags shipped inverted, so the regression
+    has to be pinned at the runner's translation step.
+    """
+    import argparse
+
+    from benchmarks.public.runner.run_subprocess import _closed_book_for
+
+    # Explicit flags win over the benchmark's own declaration, both ways.
+    assert _closed_book_for(argparse.Namespace(benchmark="browsecomp", web=False)) is True
+    assert _closed_book_for(argparse.Namespace(benchmark="officeqa", web=True)) is False
+
+    # No flag: the benchmark default decides and must be left alone.
+    assert _closed_book_for(argparse.Namespace(benchmark="browsecomp", web=None)) is False
+    assert _closed_book_for(argparse.Namespace(benchmark="officeqa", web=None)) is True
+
+    # An args namespace without the attribute at all still resolves.
+    assert _closed_book_for(argparse.Namespace(benchmark="officeqa")) is True
+
+
 class _FakeResourceManager:
     """Minimal stand-in exposing only what the tool resolvers touch."""
 
