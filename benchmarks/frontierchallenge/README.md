@@ -29,7 +29,7 @@ simulation, electrochemistry, quantitative imaging, and molecular biology.
   <tbody>
     <tr><td>Tasks</td><td>97 (74 hard, 23 medium)</td></tr>
     <tr><td>Taxonomy</td><td>6 domains, 21 subdomains</td></tr>
-    <tr><td>Runtime</td><td>81 open-image tasks, 16 user-supplied ORCA tasks</td></tr>
+    <tr><td>Runtime</td><td>81 open-image tasks, 16 tasks executing user-supplied ORCA</td></tr>
     <tr><td>Grading</td><td>deterministic checks; 77 tasks also judge the report</td></tr>
     <tr><td>Harness</td><td>Harbor 0.20.0</td></tr>
     <tr><td>Output</td><td>named files under <code>/app/output</code></td></tr>
@@ -59,10 +59,10 @@ its SHA-256, and load it into Docker:
 HF_TOKEN=hf_... ./scripts/setup.sh --track open
 ```
 
-The full track adds 16 normally released ORCA tasks. FrontierChallenge does
-not distribute ORCA or an image containing it. After obtaining ORCA 6.0.1 from
-its official provider, build and smoke-test the private local runtime, then
-validate the full track:
+The full track adds 16 normally released tasks that execute ORCA.
+FrontierChallenge does not distribute ORCA or an image containing it. After
+obtaining ORCA 6.0.1 from its official provider, build and smoke-test the
+private local runtime, then validate the full track:
 
 ```bash
 ./scripts/build_orca_runtime.sh \
@@ -73,6 +73,10 @@ HF_TOKEN=hf_... ./scripts/setup.sh --track full
 
 Do not push, export, publish, or share the resulting ORCA image. See the
 [ORCA setup tutorial](docs/providers/orca.md).
+
+Track membership describes what a task executes, not where its input files
+came from. For example, `task_098_orca_claisen_thermochemistry` reads supplied
+ORCA output but does not run ORCA, so it belongs to the open track.
 
 ### 2. Run a real task
 

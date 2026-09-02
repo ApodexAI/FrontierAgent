@@ -61,19 +61,25 @@ This is the shortest path for most evaluators:
 HF_TOKEN=hf_... ./scripts/setup.sh --track open
 ```
 
-Setup downloads the solve and reference datasets from their current `main` branches,
-verifies both packages, binds them to this checkout's `registry.json`, then
+Setup downloads the solve and reference revisions pinned by this Git checkout in
+`release/datasets.json`, verifies both packages, binds them to this checkout's
+`registry.json`, then
 downloads `images/frontierchallenge-cpu-open-2026.08.docker.tar.zst` from the
 solve dataset. It checks the declared size, SHA-256 and image ID before loading
 the `linux/amd64` image into Docker. No container registry is used. Evaluator-
 local paths are written to `.frontierchallenge/config.env`.
 
+For release development only, `--revision main` overrides both pins;
+`--reference-revision` can override the reference revision independently. Normal
+evaluation should keep the checkout's pins so later dataset changes cannot alter
+an otherwise identical run.
+
 ### Full track: build the private ORCA runtime
 
-All 16 ORCA task statements and inputs are released normally. Only ORCA and a
-configured ORCA image are absent. Obtain ORCA 6.0.1 from its official provider,
-install it outside this checkout, and keep the complete directory together.
-Then run:
+All statements and inputs for the 16 tasks that execute ORCA are released
+normally. Only ORCA and a configured ORCA image are absent. Obtain ORCA 6.0.1
+from its official provider, install it outside this checkout, and keep the
+complete directory together. Then run:
 
 ```bash
 ./scripts/build_orca_runtime.sh \
@@ -117,6 +123,11 @@ The runner verifies the three registries again, copies only selected solve-side
 tasks into evaluator staging, decrypts the matching verifier there, starts the
 agent, and invokes Harbor's verifier after the agent exits. By default Claude
 Code's `WebSearch` and `WebFetch` tools are disabled.
+
+Selection comes from each task's declared `task.json.environment`, validated
+against the registry. Include/exclude filters are applied before image preflight,
+staging, verifier decryption, resume, and Harbor invocation; stale directories
+from an older run cannot add tasks to the effective run.
 
 A healthy run reaches messages like:
 

@@ -40,6 +40,11 @@ or distribute it. After obtaining and installing ORCA officially, run:
 The build helper runs a real ORCA calculation, and the runner checks the local
 image again before any selected ORCA task starts.
 
+An open task may still mention ORCA because it reads supplied output files.
+That does not require the licensed runtime: preflight follows the task's
+registry-backed execution environment, not instruction text. For example,
+`task_098_orca_claisen_thermochemistry` belongs to the open track.
+
 ## Every task fails during agent setup
 
 Check that `.env` contains the key required by the selected agent and that the

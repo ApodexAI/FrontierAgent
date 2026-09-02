@@ -14,7 +14,10 @@ HF_TOKEN=hf_... ./scripts/setup.sh --track open
 ```
 
 The table below previews benchmark coverage without exposing evaluator data.
-Keywords come from each task and describe technique rather than answers.
+Keywords come from each task and describe technique rather than answers. The
+`Image` column records what the task executes, not software named in supplied
+files: `task_098_orca_claisen_thermochemistry`, for example, reads precomputed
+ORCA output and therefore uses the open image.
 
 | Task | Difficulty | Image | Judge | Agent budget | Techniques |
 |---|---|---|---|---|---|

@@ -19,9 +19,12 @@ workspace.
 HF_TOKEN=hf_... ./scripts/setup.sh --track open
 ```
 
-Setup downloads the current `main` branches, runs the verification tool bundled
-with each dataset, and requires both `source_registry.json` files to equal this
-checkout's `registry.json`. A mixed or incomplete dataset is refused.
+Setup downloads the exact solve and reference commits declared in
+`release/datasets.json`, runs the verification tool bundled with each dataset,
+and requires both `source_registry.json` files to equal this checkout's
+`registry.json`. A mixed or incomplete dataset is refused. Release maintainers
+may test newer snapshots with `--revision` and `--reference-revision`; published
+runtime changes should update both pins together.
 
 Use local directories instead of HF repository IDs for an offline handoff:
 
@@ -44,3 +47,9 @@ the encrypted verifier hash. GitHub contains neither payload. The solve dataset
 must contain no `tests/`, verifier archive, rubric, fixture, or reference
 output; the reference dataset must contain no instruction, input, or runtime
 environment.
+
+The top-level Hugging Face `README.md` is intentionally outside
+`checksums.sha256`: it is a mutable dataset card whose citation and links may be
+edited without changing the benchmark payload. Task files, task-level READMEs,
+registries, manifests, image artifacts, and verifier archives remain covered by
+the checksum manifests and registry commitments.

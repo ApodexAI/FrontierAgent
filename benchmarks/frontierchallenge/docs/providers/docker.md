@@ -92,7 +92,7 @@ path.
 ## Two things that bite
 
 **ORCA is user-supplied and writes beside its input.** Before selecting one of
-the 16 ORCA tasks, create the licensed local runtime described in
+the 16 tasks that execute ORCA, create the licensed local runtime described in
 [orca.md](orca.md). Copy ORCA inputs into a writable directory (`/app/data`,
 `/tmp`) before running; invoking ORCA directly on a read-only bind-mounted file
 fails.
