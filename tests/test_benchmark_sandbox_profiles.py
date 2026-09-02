@@ -92,28 +92,39 @@ def test_book_policy_override_wins_both_ways():
     assert resolve_closed_book("browsecomp", True) is True    # --no-web
 
 
-def test_runner_does_not_invert_the_web_flags() -> None:
-    """``--no-web`` must reach the workers as closed-book, and vice versa.
+async def test_runner_does_not_invert_the_web_flags(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``--no-web`` must reach ``resolve_closed_book`` as closed-book, and vice versa.
 
     ``resolve_closed_book`` is polarity-correct on its own, so its unit tests
     above stay green even when the runner hands it an un-negated *open-book*
-    flag. That is exactly how the flags shipped inverted, so the regression
-    has to be pinned at the runner's translation step.
+    flag. That is exactly how the flags shipped inverted, so the regression has
+    to be pinned on the handoff inside ``run_eval``.
     """
     import argparse
 
-    from benchmarks.public.runner.run_subprocess import _closed_book_for
+    from benchmarks.public import sandbox_profiles
+    from benchmarks.public.runner import run_subprocess
 
-    # Explicit flags win over the benchmark's own declaration, both ways.
-    assert _closed_book_for(argparse.Namespace(benchmark="browsecomp", web=False)) is True
-    assert _closed_book_for(argparse.Namespace(benchmark="officeqa", web=True)) is False
+    class _Stop(Exception):
+        """Sentinel: end the run once the override has been observed."""
 
-    # No flag: the benchmark default decides and must be left alone.
-    assert _closed_book_for(argparse.Namespace(benchmark="browsecomp", web=None)) is False
-    assert _closed_book_for(argparse.Namespace(benchmark="officeqa", web=None)) is True
+    seen: list[bool | None] = []
 
-    # An args namespace without the attribute at all still resolves.
-    assert _closed_book_for(argparse.Namespace(benchmark="officeqa")) is True
+    def _spy(benchmark: str, override: bool | None = None) -> bool:
+        seen.append(override)
+        raise _Stop
+
+    monkeypatch.setattr(sandbox_profiles, "resolve_closed_book", _spy)
+
+    for web in (True, False, None):
+        args = argparse.Namespace(benchmark="browsecomp", pipeline=None, web=web)
+        with pytest.raises(_Stop):
+            await run_subprocess.run_eval(args, out_dir=tmp_path, seed=0)
+
+    # --web is open-book, --no-web is closed-book, no flag defers to the benchmark.
+    assert seen == [False, True, None]
 
 
 class _FakeResourceManager:

@@ -203,25 +203,6 @@ async def run_task_subprocess(
 
 # ── One-run evaluator ────────────────────────────────────────────────
 
-def _closed_book_for(args: argparse.Namespace) -> bool:
-    """Book policy for this run, honouring ``--web`` / ``--no-web``.
-
-    The two are *open-book* flags: ``--web`` sets ``args.web`` True, ``--no-web``
-    sets it False, and absence leaves None. ``resolve_closed_book`` takes the
-    opposite polarity — its ``override`` is the *closed-book* decision, returned
-    verbatim. Feeding ``args.web`` in unnegated makes both flags do the reverse of
-    their help text, and exports an inverted ``REACT_NO_WEB``/``SWARM_NO_WEB`` to
-    every worker, so the run scores under the book policy nobody asked for.
-
-    None stays None so an unflagged run still falls through to the benchmark's
-    own declaration.
-    """
-    from benchmarks.public.sandbox_profiles import resolve_closed_book
-
-    web = getattr(args, "web", None)
-    return resolve_closed_book(args.benchmark, None if web is None else not web)
-
-
 async def run_eval(
     args: argparse.Namespace,
     *,
@@ -241,10 +222,20 @@ async def run_eval(
     # Both names are set because the toggle is read per workflow — stateful
     # reads REACT_NO_WEB, agent-team reads SWARM_NO_WEB — and a benchmark should
     # get the same policy whichever workflow runs it.
-    closed = _closed_book_for(args)
+    # --web/--no-web are open-book flags; resolve_closed_book's override is the
+    # closed-book decision, returned verbatim. Negate, or both flags do the
+    # reverse of their help text. None falls through to the benchmark's own
+    # declaration.
+    from benchmarks.public.sandbox_profiles import resolve_closed_book
+
+    web = getattr(args, "web", None)
+    closed = resolve_closed_book(
+        args.benchmark,
+        None if web is None else not web,
+    )
     os.environ["REACT_NO_WEB"] = "1" if closed else "0"
     os.environ["SWARM_NO_WEB"] = "1" if closed else "0"
-    source = "--web/--no-web" if getattr(args, "web", None) is not None else "benchmark default"
+    source = "--web/--no-web" if web is not None else "benchmark default"
     logger.info(
         "Book policy: %s (%s) — web tools %s",
         "closed-book" if closed else "open-book", source,
