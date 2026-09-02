@@ -233,33 +233,55 @@ fi
 
 mkdir -p "$STAGE_DIR" "$JOBS_DIR"
 
-# Mirror Harbor's include/exclude matching so only selected tasks are staged.
-task_selected() {
-  local task_id="$1"
-  if [[ ${#INCLUDE_PATTERNS[@]} -gt 0 ]]; then
-    local matched=0
-    for pattern in "${INCLUDE_PATTERNS[@]}"; do
-      [[ "$task_id" == $pattern ]] && { matched=1; break; }
-    done
-    [[ "$matched" -eq 1 ]] || return 1
-  fi
-  for pattern in "${EXCLUDE_PATTERNS[@]}"; do
-    [[ "$task_id" == $pattern ]] && return 1
+# Resolve selection once from the verified solve package. Persistent staging may
+# contain tasks from older runs, so it must never define preflight or grading.
+SELECTION_ARGS=(
+  --tasks-root "$SOLVE_TASKS"
+  --registry "$SOLVE_DIR/source_registry.json"
+  --track "$TRACK"
+)
+if [[ ${#INCLUDE_PATTERNS[@]} -gt 0 ]]; then
+  for pattern in "${INCLUDE_PATTERNS[@]}"; do
+    SELECTION_ARGS+=(--include "$pattern")
   done
-  return 0
-}
+fi
+if [[ ${#EXCLUDE_PATTERNS[@]} -gt 0 ]]; then
+  for pattern in "${EXCLUDE_PATTERNS[@]}"; do
+    SELECTION_ARGS+=(--exclude "$pattern")
+  done
+fi
+
+if ! SELECTION_OUTPUT="$(
+  python3 "$ROOT/scripts/task_selection.py" "${SELECTION_ARGS[@]}"
+)"; then
+  echo "FATAL: task selection is invalid." >&2
+  exit 1
+fi
+EFFECTIVE_TASK_IDS=()
+EFFECTIVE_TASK_ENVS=()
+EFFECTIVE_TASK_SOURCES=()
+while IFS=$'\t' read -r task_id task_environment task_source; do
+  [[ -n "$task_id" ]] || continue
+  EFFECTIVE_TASK_IDS+=("$task_id")
+  EFFECTIVE_TASK_ENVS+=("$task_environment")
+  EFFECTIVE_TASK_SOURCES+=("$task_source")
+done <<< "$SELECTION_OUTPUT"
+unset SELECTION_OUTPUT
+if [[ ${#EFFECTIVE_TASK_IDS[@]} -eq 0 ]]; then
+  echo "FATAL: task selection is empty." >&2
+  exit 1
+fi
 
 echo "== Staging $TRACK-track tasks from $SOLVE_TASKS into $STAGE_DIR =="
 staged=0
 skipped=0
-for task_dir in "$SOLVE_TASKS"/*/; do
-  task_id="$(basename "$task_dir")"
-  [[ -f "$task_dir/task.toml" ]] || continue
-  if [[ "$TRACK" == "open" ]] && ! grep -q '"environment": "open"' "$task_dir/task.json"; then
-    continue
-  fi
-  task_selected "$task_id" || continue
+EFFECTIVE_TASK_DIRS=()
+for index in "${!EFFECTIVE_TASK_IDS[@]}"; do
+  task_id="${EFFECTIVE_TASK_IDS[$index]}"
+  task_environment="${EFFECTIVE_TASK_ENVS[$index]}"
+  task_dir="${EFFECTIVE_TASK_SOURCES[$index]}"
   dest="$STAGE_DIR/$task_id"
+  EFFECTIVE_TASK_DIRS+=("$dest")
   source_identity="$SOLVE_DIR|$(grep -m1 '"source_task_sha256"' "$task_dir/task.json" | tr -d ' ,\"')|$OPEN_IMAGE"
   if [[ "$FORCE_RESTAGE" -eq 0 && -f "$dest/task.toml" \
         && -f "$dest/instruction.md" && ! -e "$dest/statement.fcref" \
@@ -271,9 +293,12 @@ for task_dir in "$SOLVE_TASKS"/*/; do
 # Copy the verified solve task and pin its open-image Dockerfile to setup's
 # selected reference. The HF source is immutable; only the staged copy changes.
   rm -rf "$dest"
-  cp -a "$task_dir" "$dest"
+  # Hugging Face snapshots may expose files as cache-relative symlinks. Copy
+  # their contents so the evaluator stage cannot contain broken links after it
+  # leaves the snapshot directory hierarchy.
+  cp -aL "$task_dir" "$dest"
   printf '%s\n' "$source_identity" > "$dest/.frontier-source"
-  if grep -q '"environment": "open"' "$dest/task.json"; then
+  if [[ "$task_environment" == "open" ]]; then
     OPEN_IMAGE="$OPEN_IMAGE" python3 - "$dest/environment/Dockerfile" <<'PIN_OPEN_IMAGE'
 import os
 import pathlib
@@ -316,15 +341,15 @@ if [[ "$AGENT" == "claude-code" && ${#AGENT_KWARGS[@]} -eq 0 ]]; then
   # Prevent direct web lookup unless the evaluator deliberately overrides this.
   AGENT_KWARG_ARGS+=(--agent-kwarg "disallowed_tools=WebSearch WebFetch")
 fi
-AGENT_KWARG_ARGS+=("${AGENT_KWARGS[@]}")
+if [[ ${#AGENT_KWARGS[@]} -gt 0 ]]; then
+  AGENT_KWARG_ARGS+=("${AGENT_KWARGS[@]}")
+fi
 
 INCLUDE_ARGS=()
-for pattern in "${INCLUDE_PATTERNS[@]}"; do
-  INCLUDE_ARGS+=("--include-task-name" "$pattern")
-done
-EXCLUDE_ARGS=()
-for pattern in "${EXCLUDE_PATTERNS[@]}"; do
-  EXCLUDE_ARGS+=("--exclude-task-name" "$pattern")
+# Give Harbor the exact resolved IDs. This makes stale directories in a reused
+# stage invisible even when the user supplied no include/exclude flags.
+for task_id in "${EFFECTIVE_TASK_IDS[@]}"; do
+  INCLUDE_ARGS+=("--include-task-name" "$task_id")
 done
 
 # A command-line verifier env takes precedence over the task declaration.
@@ -388,18 +413,9 @@ fi
 # Fail before evaluation if a selected task needs ORCA but the evaluator-local
 # licensed runtime is unavailable.
 orca_tasks=()
-for task_dir in "$STAGE_DIR"/*/; do
-  [[ -d "$task_dir" ]] || continue
-  task_name="$(basename "$task_dir")"
-  if [[ ${#INCLUDE_PATTERNS[@]} -gt 0 ]]; then
-    matched=0
-    for pattern in "${INCLUDE_PATTERNS[@]}"; do
-      [[ "$task_name" == *"$pattern"* ]] && { matched=1; break; }
-    done
-    [[ "$matched" -eq 1 ]] || continue
-  fi
-  if grep -qil 'orca' "$task_dir/task.toml" "$task_dir/instruction.md" "$task_dir/environment/Dockerfile" 2>/dev/null; then
-    orca_tasks+=("$task_name")
+for index in "${!EFFECTIVE_TASK_IDS[@]}"; do
+  if [[ "${EFFECTIVE_TASK_ENVS[$index]}" == "licensed-orca" ]]; then
+    orca_tasks+=("${EFFECTIVE_TASK_IDS[$index]}")
   fi
 done
 if [[ ${#orca_tasks[@]} -gt 0 ]]; then
@@ -434,15 +450,14 @@ fi
 # completed trial directories but archive stale job-level metadata.
 RESUME_JOB=0
 if [[ -f "$JOBS_DIR/$JOB_NAME/config.json" ]]; then
-  if REQUESTED="${INCLUDE_PATTERNS[*]-}" python3 - "$JOBS_DIR/$JOB_NAME/lock.json" <<'PY'
+  if REQUESTED="${EFFECTIVE_TASK_IDS[*]}" python3 - "$JOBS_DIR/$JOB_NAME/lock.json" <<'PY'
 import json, os, sys
 requested = set(os.environ.get("REQUESTED", "").split())
 try:
     recorded = {t["task"]["name"] for t in json.load(open(sys.argv[1]))["trials"]}
 except Exception:
     sys.exit(1)          # unreadable lock -> treat as new work
-# No --include means "the whole staged set", which resume also covers.
-sys.exit(0 if not requested or requested == recorded else 1)
+sys.exit(0 if requested == recorded else 1)
 PY
   then
     RESUME_JOB=1
@@ -469,10 +484,8 @@ if [[ -f "$REFERENCE_DIR/tools/verify_reference_dataset.py" ]]; then
 fi
 echo "== Injecting encrypted verifier archives from $REFERENCE_DIR =="
 injected=0
-for task_dir in "$STAGE_DIR"/*/; do
-  [[ -f "$task_dir/task.toml" ]] || continue
+for task_dir in "${EFFECTIVE_TASK_DIRS[@]}"; do
   task_id="$(basename "$task_dir")"
-  task_selected "$task_id" || continue
   source_verifier="$REFERENCE_TASKS/$task_id/verifier.fcref"
   if [[ ! -f "$source_verifier" ]]; then
     echo "FATAL: encrypted verifier missing for $task_id: $source_verifier" >&2
@@ -497,8 +510,7 @@ echo "Injected $injected encrypted verifier archive(s)."
 if [[ -f "$ROOT/scripts/reference_archive.py" ]]; then
   echo "== Unsealing encrypted verifiers with the published archive password =="
   unsealed=0
-  for task_dir in "$STAGE_DIR"/*/; do
-    [[ -f "$task_dir/task.toml" ]] || continue
+  for task_dir in "${EFFECTIVE_TASK_DIRS[@]}"; do
     if [[ ! -f "$task_dir/instruction.md" || ! -f "$task_dir/verifier.fcref" ]]; then
       echo "FATAL: $(basename "$task_dir") lacks plaintext instruction or verifier archive." >&2
       exit 1
@@ -534,7 +546,7 @@ else
     --artifact /app/output \
     --jobs-dir "$JOBS_DIR" --job-name "$JOB_NAME" \
     --env-file "$ENV_FILE" \
-    "${AGENT_KWARG_ARGS[@]}" "${INCLUDE_ARGS[@]}" "${EXCLUDE_ARGS[@]}" "${VERIFIER_ENV_ARGS[@]}" \
+    "${AGENT_KWARG_ARGS[@]}" "${INCLUDE_ARGS[@]}" "${VERIFIER_ENV_ARGS[@]}" \
     --yes
 fi
 
