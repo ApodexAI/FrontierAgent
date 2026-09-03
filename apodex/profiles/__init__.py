@@ -59,6 +59,10 @@ class AgentProfile:
     # the lightweight terminal ReAct loop.
     workflow: str | None = None
     workflow_profile: str | None = None
+    # The tool names the profile declares. ``tools`` is a factory that imports
+    # and builds the tool registry, which a local config preflight has no reason
+    # to pay for, so the declared names are kept alongside it.
+    tool_names: tuple[str, ...] = ()
 
     def runtime_config(
         self, cfg: ModelConfig, *, mode: str | None = None,
@@ -238,6 +242,7 @@ def _build(name: str) -> AgentProfile:
         models=models,
         system_prompt=system_prompt,
         tools=_tool_factory([str(t) for t in (raw.get("tools") or [])]),
+        tool_names=tuple(str(t) for t in (raw.get("tools") or [])),
         skills=[str(s) for s in (raw.get("skills") or [])],
         extra_observers=_robustness_observers,
         max_turns=int(max_turns) if max_turns is not None else None,

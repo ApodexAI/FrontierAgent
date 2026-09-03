@@ -147,25 +147,34 @@ def inspect_runtime_config(
                 env_var=profile.base_url_env,
             ))
 
-    if active_mode == "research":
-        if not _configured(env.get("SERPER_API_KEY")):
-            issues.append(RuntimeConfigIssue(
-                code="missing_serper_api_key",
-                message=(
-                    "SERPER_API_KEY is required in research mode because "
-                    "web_search cannot return results without it."
-                ),
-                env_var="SERPER_API_KEY",
-            ))
-        if not _configured(env.get("JINA_API_KEY")):
-            issues.append(RuntimeConfigIssue(
-                code="missing_jina_api_key",
-                message=(
-                    "JINA_API_KEY is missing; web_fetch will use its direct-fetch fallback."
-                ),
-                env_var="JINA_API_KEY",
-                blocking=False,
-            ))
+    # Gate the search credentials on the tools the profile actually binds, not
+    # on the mode name. Keying this on ``research`` meant it never fired: the
+    # terminal only exposes ``react`` and ``agent_team``, and both bind
+    # web_search and web_fetch, so a missing key first surfaced as an error
+    # string inside a tool result.
+    tool_names = frozenset(getattr(profile, "tool_names", ()) or ())
+    if "web_search" in tool_names and not _configured(env.get("SERPER_API_KEY")):
+        issues.append(RuntimeConfigIssue(
+            code="missing_serper_api_key",
+            message=(
+                "SERPER_API_KEY is not set; web_search will return an error "
+                "instead of results for every query this session makes."
+            ),
+            env_var="SERPER_API_KEY",
+            # A warning, not a blocker: web_search is one of seven tools these
+            # profiles bind, so a local coding session has no use for the key
+            # and must not be refused a startup over it.
+            blocking=False,
+        ))
+    if "web_fetch" in tool_names and not _configured(env.get("JINA_API_KEY")):
+        issues.append(RuntimeConfigIssue(
+            code="missing_jina_api_key",
+            message=(
+                "JINA_API_KEY is missing; web_fetch will use its direct-fetch fallback."
+            ),
+            env_var="JINA_API_KEY",
+            blocking=False,
+        ))
 
     return RuntimeConfigStatus(
         mode=active_mode,
