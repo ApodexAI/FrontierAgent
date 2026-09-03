@@ -266,7 +266,6 @@ async def run_eval(
 
     questions = load_questions(
         args.benchmark,
-        limit=args.limit,
         offset=args.offset,
         answer_type=args.answer_type,
         category=args.category,
