@@ -18,9 +18,12 @@ The public API is ``AgentProfile`` / ``get_profile`` / ``profile_names``.
 
 from __future__ import annotations
 
+import importlib
+import logging
 import os
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import cache
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +33,50 @@ from frontier_agent.infra.providers import environment_variable_source
 _PKG_DIR = Path(__file__).resolve().parent
 _USER_DIR = Path(os.path.expanduser("~/.apodex/profiles"))
 _TERMINAL_WORKFLOW_MODES = ("react", "agent_team")
+
+# ``workflow:`` → the module and loader that resolve its ``workflow_profile:``.
+# Add a row when a new workflow ships a profile loader.
+_WORKFLOW_PROFILE_LOADERS = {
+    "stateful-react-agent": (
+        "workflows.stateful_react_agent.profile", "load_react_profile",
+    ),
+    "agent_team": ("workflows.agent_team.profile", "load_swarm_profile"),
+}
+# Where a workflow profile lists the tools it binds: one allowlist for the ReAct
+# agent, one per role for the team.
+_WORKFLOW_TOOL_KEYS = ("agent_tools", "main_agent_tools", "sub_agent_tools")
+
+
+@cache
+def _workflow_tool_names(workflow: str, workflow_profile: str) -> tuple[str, ...]:
+    """The tools ``workflow`` binds under ``workflow_profile``.
+
+    Resolved through the workflow's own loader rather than by reading the YAML
+    path, so profile aliases, ``${VAR}`` expansion and shipped overrides give
+    the same answer here as they do at dispatch — one source of truth instead
+    of a second list to keep in step.
+    """
+    entry = _WORKFLOW_PROFILE_LOADERS.get(workflow)
+    if entry is None or not workflow_profile:
+        return ()
+    module_path, loader_name = entry
+    # The loaders log their own config diagnostics (provider label mismatches,
+    # empty keys). Dispatch loads the same profile again and logs them there,
+    # where ``_route_engine_logs`` puts them in front of the user; emitting them
+    # here as well only doubles them onto a stderr the TUI is about to cover.
+    previous = logging.root.manager.disable
+    try:
+        loader = getattr(importlib.import_module(module_path), loader_name)
+        logging.disable(logging.WARNING)
+        agent = (loader(workflow_profile) or {}).get("agent") or {}
+    except Exception:
+        # A preflight reports on the run; it must never be the thing that stops
+        # one. An unreadable workflow profile simply checks no tool credentials.
+        return ()
+    finally:
+        logging.disable(previous)
+    names = [str(t) for key in _WORKFLOW_TOOL_KEYS for t in (agent.get(key) or [])]
+    return tuple(dict.fromkeys(names))
 
 
 @dataclass(frozen=True)
@@ -59,10 +106,24 @@ class AgentProfile:
     # the lightweight terminal ReAct loop.
     workflow: str | None = None
     workflow_profile: str | None = None
-    # The tool names the profile declares. ``tools`` is a factory that imports
-    # and builds the tool registry, which a local config preflight has no reason
-    # to pay for, so the declared names are kept alongside it.
-    tool_names: tuple[str, ...] = ()
+    # The tool names the YAML declares. ``tools`` is a factory that imports and
+    # builds the tool registry, which a local config preflight has no reason to
+    # pay for, so the declared names are kept alongside it. Read
+    # ``tool_names`` — not this — for what the profile actually runs with.
+    declared_tools: tuple[str, ...] = ()
+
+    @property
+    def tool_names(self) -> tuple[str, ...]:
+        """The tool names this profile actually runs with.
+
+        A workflow-backed profile (``react``, ``agent_team``) never binds
+        ``declared_tools``: dispatch hands the run to the native workflow, whose
+        own profile carries the allowlists. Reading the top-level list would
+        report on tools that are not bound and miss tools that are.
+        """
+        if self.workflow:
+            return _workflow_tool_names(self.workflow, self.workflow_profile or "")
+        return self.declared_tools
 
     def runtime_config(
         self, cfg: ModelConfig, *, mode: str | None = None,
@@ -242,7 +303,7 @@ def _build(name: str) -> AgentProfile:
         models=models,
         system_prompt=system_prompt,
         tools=_tool_factory([str(t) for t in (raw.get("tools") or [])]),
-        tool_names=tuple(str(t) for t in (raw.get("tools") or [])),
+        declared_tools=tuple(str(t) for t in (raw.get("tools") or [])),
         skills=[str(s) for s in (raw.get("skills") or [])],
         extra_observers=_robustness_observers,
         max_turns=int(max_turns) if max_turns is not None else None,
