@@ -6,6 +6,9 @@ tool-name resolution (and unknown-tool errors), and skill wrapping.
 
 from __future__ import annotations
 
+import logging
+import pathlib
+
 import pytest
 
 import apodex.profiles as P
@@ -16,9 +19,11 @@ from frontier_agent.infra import providers
 def _fresh_caches():
     """Each test resolves profiles/providers from the current env."""
     P._CACHE.clear()
+    P._workflow_tool_names.cache_clear()
     providers._reset_cache()
     yield
     P._CACHE.clear()
+    P._workflow_tool_names.cache_clear()
     providers._reset_cache()
 
 
@@ -98,6 +103,73 @@ def test_native_workflow_modes_are_explicit_and_use_shipped_profiles(monkeypatch
     assert (team.workflow, team.workflow_profile) == (
         "agent_team", "tui",
     )
+
+
+def test_workflow_modes_expose_the_tools_their_workflow_profile_binds(monkeypatch):
+    """``tool_names`` must be the list that runs, not a second copy of it.
+
+    ``react``/``agent_team`` dispatch to a native workflow and never bind a
+    top-level ``tools:``, so reading one would both miss the coordinator-only
+    tools and report on tools the workflow does not have.
+    """
+    import yaml
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://example.test/v1")
+    monkeypatch.setenv("OPENAI_MODEL", "test-model")
+
+    repo = pathlib.Path(P.__file__).resolve().parents[2]
+    for mode in ("react", "agent_team"):
+        profile = P.get_profile(mode)
+        assert profile.declared_tools == ()          # nothing to drift
+        workflow_yaml = (
+            repo / "workflows" / profile.workflow.replace("-", "_")
+            / "profiles" / f"{profile.workflow_profile}.yaml"
+        )
+        agent = yaml.safe_load(workflow_yaml.read_text(encoding="utf-8"))["agent"]
+        expected = {
+            str(t)
+            for key in ("agent_tools", "main_agent_tools", "sub_agent_tools")
+            for t in (agent.get(key) or [])
+        }
+        assert set(profile.tool_names) == expected, mode
+        assert "web_search" in profile.tool_names, mode
+
+    # Coordinator-only, and present in no apodex profile YAML: it can only have
+    # come from the workflow profile.
+    assert "create_subagent" in P.get_profile("agent_team").tool_names
+
+
+def test_reading_workflow_tool_names_stays_quiet(monkeypatch, caplog):
+    """The loader's own config warnings belong to the run, not the preflight.
+
+    ``load_swarm_profile`` warns about provider label mismatches and empty
+    keys. Dispatch loads the same profile again and logs them where the
+    renderer routes them, so repeating them here would print each one twice,
+    the second time onto a stderr the TUI is about to cover.
+    """
+    monkeypatch.setenv("OPENAI_PROVIDER", "local")
+    monkeypatch.setenv("OPENAI_API_KEY", "EMPTY")
+    monkeypatch.setenv("OPENAI_BASE_URL", "http://model:30000/v1")
+    monkeypatch.setenv("OPENAI_MODEL", "local-model")
+
+    with caplog.at_level(logging.WARNING):
+        assert "web_search" in P._workflow_tool_names("agent_team", "tui")
+    assert caplog.records == []
+
+    # Restored, not left off: the same load logs normally at dispatch.
+    P._workflow_tool_names.cache_clear()
+    with caplog.at_level(logging.WARNING):
+        from workflows.agent_team.profile import load_swarm_profile
+        load_swarm_profile("tui")
+    assert caplog.records
+
+
+def test_workflow_tool_names_never_break_startup(monkeypatch):
+    """An unreadable workflow profile checks no credentials; it does not raise."""
+    P._workflow_tool_names.cache_clear()
+    assert P._workflow_tool_names("no-such-workflow", "tui") == ()
+    assert P._workflow_tool_names("agent_team", "no-such-profile") == ()
 
 
 def test_native_workflow_modes_accept_local_openai_compatible_provider(monkeypatch):

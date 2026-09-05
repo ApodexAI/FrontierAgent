@@ -25,6 +25,7 @@ def _profile(**overrides):
         "api_key_env": "OPENAI_API_KEY",
         "base_url_env": "OPENAI_BASE_URL",
         "model_env": "OPENAI_MODEL",
+        "tool_names": (),
     }
     values.update(overrides)
     return SimpleNamespace(**values)
@@ -84,27 +85,55 @@ def test_local_empty_placeholder_is_allowed():
     assert status.endpoint_host == "localhost"
 
 
-def test_research_serper_blocks_and_jina_warns_but_coding_ignores_both():
+_WEB_TOOLS = ("web_search", "web_fetch", "bash", "read_file")
+
+
+def test_search_credentials_are_checked_when_the_profile_binds_the_web_tools():
     cfg = ModelConfig(model="gpt-test", api_key="secret", base_url="https://api.test/v1")
-    research = inspect_runtime_config(cfg, profile=_profile(name="research"), environ={})
-    assert [issue.code for issue in research.errors] == ["missing_serper_api_key"]
-    assert [issue.code for issue in research.warnings] == ["missing_jina_api_key"]
-    rendered = format_runtime_config_status(research)
-    assert "error: SERPER_API_KEY" in rendered
+    web = inspect_runtime_config(
+        cfg, profile=_profile(tool_names=_WEB_TOOLS), environ={},
+    )
+    # Both warn: a coding session that never searches must still start.
+    assert web.ok
+    assert [issue.code for issue in web.warnings] == [
+        "missing_serper_api_key", "missing_jina_api_key",
+    ]
+    rendered = format_runtime_config_status(web)
+    assert "warning: SERPER_API_KEY" in rendered
     assert "warning: JINA_API_KEY" in rendered
 
-    research_with_search = inspect_runtime_config(
+    with_search = inspect_runtime_config(
         cfg,
-        profile=_profile(name="research"),
+        profile=_profile(tool_names=_WEB_TOOLS),
         environ={"SERPER_API_KEY": "search-secret"},
     )
-    assert research_with_search.ok
-    assert [issue.code for issue in research_with_search.warnings] == [
-        "missing_jina_api_key",
-    ]
+    assert with_search.ok
+    assert [issue.code for issue in with_search.warnings] == ["missing_jina_api_key"]
 
-    coding = inspect_runtime_config(cfg, profile=_profile(), environ={})
-    assert coding.ok and not coding.warnings
+    no_web_tools = inspect_runtime_config(
+        cfg, profile=_profile(tool_names=("bash", "read_file")), environ={},
+    )
+    assert no_web_tools.ok and not no_web_tools.warnings
+
+
+def test_every_selectable_terminal_mode_preflights_its_search_credentials():
+    """The check used to key on ``research``, a mode the CLI cannot select.
+
+    Both shipped modes bind web_search, so a blank SERPER_API_KEY reached the
+    model as an error string inside a tool result instead of failing preflight.
+    """
+    from apodex.profiles import get_profile, terminal_mode_names
+
+    cfg = ModelConfig(model="gpt-test", api_key="secret", base_url="https://api.test/v1")
+    modes = terminal_mode_names()
+    assert modes, "the terminal must expose at least one mode"
+    for mode in modes:
+        profile = get_profile(mode)
+        assert "web_search" in profile.tool_names, mode
+        status = inspect_runtime_config(cfg, profile=profile, mode=mode, environ={})
+        assert "missing_serper_api_key" in [i.code for i in status.warnings], mode
+        # Warned about, never refused a startup.
+        assert status.ok, mode
 
 
 def test_cli_fails_before_session_construction_with_actionable_guidance(
