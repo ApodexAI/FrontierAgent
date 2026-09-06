@@ -1555,3 +1555,20 @@ def test_download_file_target_is_the_resolved_destination(monkeypatch, tmp_path)
     assert named.startswith(str(tmp_path / "downloads" / "p.pdf"))
     assert "/elsewhere/" not in named           # the requested directory is ignored
     assert "renamed" in named                   # collisions rename it
+
+
+def test_native_workflow_uses_authoritative_loop_telemetry(
+    tmp_path, monkeypatch, capsys,
+):
+    _run_workflow_returning({
+        "final_answer": "done",
+        "answer_status": "complete",
+        "final_answer_source": "agent",
+        "stopped_by": "no_tool",
+        "react_steps": [{}] * 7,
+        "turns_used": 8,
+        "tool_calls_count": 7,
+    }, tmp_path, monkeypatch)
+
+    out = capsys.readouterr().out
+    assert "turns=8 · tools=7 · no_tool" in out

@@ -576,18 +576,28 @@ class TaskRunnerMixin:
             answer_status=str(state.get("answer_status") or ""),
             answer_source=str(state.get("final_answer_source") or ""),
         )
+        turns_used = (
+            int(state.get("turns_used") or 0)
+            if "turns_used" in state
+            else len(state.get("react_steps") or [])
+        )
+        tool_calls_count = (
+            int(state.get("tool_calls_count") or 0)
+            if "tool_calls_count" in state
+            else 0
+        )
         if complete:
             self.r.final(
                 final,
-                turns=len(state.get("react_steps") or []),
-                tool_calls=0,
+                turns=turns_used,
+                tool_calls=tool_calls_count,
                 stopped_by=stopped_by,
             )
         else:
             self._show_incomplete_run(
                 final,
-                turns=len(state.get("react_steps") or []),
-                tool_calls=0,
+                turns=turns_used,
+                tool_calls=tool_calls_count,
                 stopped_by=stopped_by,
             )
         await self._render_changed_files()
