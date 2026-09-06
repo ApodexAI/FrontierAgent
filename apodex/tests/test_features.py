@@ -284,6 +284,27 @@ def test_localize_absolute_path_inside_cwd(tmp_path):
     assert out is not None and out["path"] == "sub/f.py"
 
 
+def test_read_file_keeps_project_absolute_path_with_split_runtime_workspace(
+    tmp_path, monkeypatch,
+):
+    project = tmp_path / "project"
+    runtime_workspace = tmp_path / "private-workspace"
+    project.mkdir()
+    runtime_workspace.mkdir()
+    target = project / "README.md"
+    target.write_text("# project\n")
+
+    monkeypatch.setenv(
+        "FRONTIER_AGENT_WORKSPACE_DIR", str(runtime_workspace),
+    )
+
+    out = localize_path_args(
+        "read_file", {"path": str(target)}, str(project),
+    )
+
+    assert out is None
+
+
 def test_localize_preserves_absolute_task_input_path(tmp_path, monkeypatch):
     inputs = tmp_path / ".apodex" / "inputs" / "run"
     inputs.mkdir(parents=True)
