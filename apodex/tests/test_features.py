@@ -942,6 +942,33 @@ def test_generic_loop_no_tool_stop_is_a_normal_finish():
     assert _is_complete_run("max_turns", no_tool_is_complete=True) is False
 
 
+def test_stateful_react_complete_agent_no_tool_is_a_normal_finish():
+    """A workflow-certified agent answer may terminate via a tool-free turn."""
+    from apodex.task_runner import _is_complete_run
+
+    assert _is_complete_run(
+        "no_tool",
+        answer_status="complete",
+        answer_source="agent",
+    ) is True
+
+    # Do not broaden workflow no_tool into an unconditional success signal.
+    assert _is_complete_run(
+        "no_tool",
+        answer_status="best_effort",
+        answer_source="agent",
+    ) is False
+    assert _is_complete_run(
+        "no_tool",
+        answer_source="agent",
+    ) is False
+    assert _is_complete_run(
+        "max_turns",
+        answer_status="complete",
+        answer_source="agent",
+    ) is False
+
+
 async def _drive_workflow(session, profile, follow_up):
     """Run one native workflow with ``run_task`` stubbed to record follow-ups."""
     session.run_task = follow_up  # type: ignore[method-assign]
