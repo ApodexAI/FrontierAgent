@@ -60,6 +60,66 @@ def test_native_strategy_is_explicitly_not_os_isolated() -> None:
     assert "not an OS sandbox" in strategy.describe()
 
 
+def test_nonroot_native_current_sandbox_skips_tool_user_warning(
+    tmp_path, monkeypatch, caplog,
+) -> None:
+    from plugins.tools import _sandbox as tool_sandbox
+
+    monkeypatch.setenv("APODEX_IN_NATIVE", "1")
+    monkeypatch.delenv("FRONTIER_AGENT_REQUIRE_TOOL_USER", raising=False)
+    monkeypatch.setattr(tool_sandbox.os, "geteuid", lambda: 1000)
+    monkeypatch.setattr(
+        tool_sandbox, "container_uses_inner_bwrap", lambda: False,
+    )
+
+    def unexpected_identity_lookup():
+        raise AssertionError(
+            "ordinary non-root native mode must not request a tool-user identity"
+        )
+
+    monkeypatch.setattr(
+        tool_sandbox, "tool_identity", unexpected_identity_lookup,
+    )
+
+    current = tool_sandbox.CurrentSandbox(tmp_path)
+
+    assert current.commands._identity is None
+    assert "Tool-user isolation inactive" not in caplog.text
+    assert "own uid" not in caplog.text
+
+
+def test_strict_nonroot_native_still_requires_tool_identity(
+    tmp_path, monkeypatch,
+) -> None:
+    from plugins.tools import _sandbox as tool_sandbox
+
+    monkeypatch.setenv("APODEX_IN_NATIVE", "1")
+    monkeypatch.setenv("FRONTIER_AGENT_REQUIRE_TOOL_USER", "1")
+    monkeypatch.setattr(tool_sandbox.os, "geteuid", lambda: 1000)
+    monkeypatch.setattr(
+        tool_sandbox, "container_uses_inner_bwrap", lambda: False,
+    )
+
+    calls = []
+
+    def required_identity():
+        calls.append(True)
+        raise tool_sandbox.SandboxUnavailableError(
+            "strict tool-user requirement exercised"
+        )
+
+    monkeypatch.setattr(tool_sandbox, "tool_identity", required_identity)
+
+    try:
+        tool_sandbox.CurrentSandbox(tmp_path)
+    except tool_sandbox.SandboxUnavailableError as exc:
+        assert "strict tool-user requirement exercised" in str(exc)
+    else:
+        raise AssertionError("strict native mode unexpectedly bypassed tool_identity")
+
+    assert calls == [True]
+
+
 def test_native_runtime_resolves_canonical_mount_aliases(
     tmp_path, monkeypatch,
 ) -> None:
