@@ -93,6 +93,17 @@ def _is_complete_run(
     # phase hit its soft deadline. Its explicit complete status is authoritative.
     if answer_status == "complete" and answer_source == "reporter_llm":
         return True
+    # Main-agent workflows may finish with a plain-text assistant turn, which
+    # the loop records as ``no_tool``. Once the workflow has explicitly marked
+    # that agent-produced answer complete, treat that terminal as successful.
+    # Keep this narrower than accepting workflow ``no_tool`` in general: an
+    # exhausted no-tool nudge budget can also use the same stop reason.
+    if (
+        stopped_by == _NO_TOOL_STOP
+        and answer_status == "complete"
+        and answer_source == "agent"
+    ):
+        return True
     if no_tool_is_complete and stopped_by == _NO_TOOL_STOP:
         return True
     return stopped_by in _COMPLETE_TOP_LEVEL_STOPS
@@ -565,18 +576,28 @@ class TaskRunnerMixin:
             answer_status=str(state.get("answer_status") or ""),
             answer_source=str(state.get("final_answer_source") or ""),
         )
+        turns_used = (
+            int(state.get("turns_used") or 0)
+            if "turns_used" in state
+            else len(state.get("react_steps") or [])
+        )
+        tool_calls_count = (
+            int(state.get("tool_calls_count") or 0)
+            if "tool_calls_count" in state
+            else 0
+        )
         if complete:
             self.r.final(
                 final,
-                turns=len(state.get("react_steps") or []),
-                tool_calls=0,
+                turns=turns_used,
+                tool_calls=tool_calls_count,
                 stopped_by=stopped_by,
             )
         else:
             self._show_incomplete_run(
                 final,
-                turns=len(state.get("react_steps") or []),
-                tool_calls=0,
+                turns=turns_used,
+                tool_calls=tool_calls_count,
                 stopped_by=stopped_by,
             )
         await self._render_changed_files()
