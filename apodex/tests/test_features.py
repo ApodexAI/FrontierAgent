@@ -952,6 +952,8 @@ def test_native_workflow_no_tool_stop_is_not_reported_as_delivery(
     assert "no_tool" in out
     assert "partial output was not saved as a final report" in out
     assert "Final report" not in out
+    assert "turns=12" in out
+    assert "tools=0" in out
 
 
 def test_generic_loop_no_tool_stop_is_a_normal_finish():
@@ -963,7 +965,7 @@ def test_generic_loop_no_tool_stop_is_a_normal_finish():
     assert _is_complete_run("max_turns", no_tool_is_complete=True) is False
 
 
-def test_stateful_react_complete_agent_no_tool_is_a_normal_finish():
+def test_workflow_complete_agent_no_tool_is_a_normal_finish():
     """A workflow-certified agent answer may terminate via a tool-free turn."""
     from apodex.task_runner import _is_complete_run
 

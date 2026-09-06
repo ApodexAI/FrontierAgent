@@ -93,7 +93,7 @@ def _is_complete_run(
     # phase hit its soft deadline. Its explicit complete status is authoritative.
     if answer_status == "complete" and answer_source == "reporter_llm":
         return True
-    # Stateful ReAct normally finishes with a plain-text assistant turn, which
+    # Main-agent workflows may finish with a plain-text assistant turn, which
     # the loop records as ``no_tool``. Once the workflow has explicitly marked
     # that agent-produced answer complete, treat that terminal as successful.
     # Keep this narrower than accepting workflow ``no_tool`` in general: an
