@@ -25,78 +25,21 @@ def _questions(count: int = 20) -> list[BenchmarkQuestion]:
 
 
 @pytest.mark.asyncio
-async def test_runner_applies_limit_after_seeded_shuffle(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from benchmarks.public import sandbox_profiles
-    from benchmarks.public.core import harbor_task_generator, registry
-    from benchmarks.public.runner import run_subprocess
-
-    source = _questions()
-    selected_runs: list[list[str]] = []
-    load_calls: list[dict[str, object]] = []
-
-    monkeypatch.setattr(
-        registry,
-        "get_config",
-        lambda _benchmark: SimpleNamespace(
-            default_pipeline="stateful-react-agent",
-            scoring_mode="external",
-            name="Sample",
-        ),
-    )
-
-    def load_questions(_benchmark: str, **kwargs: object) -> list[BenchmarkQuestion]:
-        load_calls.append(kwargs)
-        return source.copy()
-
-    monkeypatch.setattr(registry, "load_questions", load_questions)
-    monkeypatch.setattr(
-        sandbox_profiles,
-        "resolve_closed_book",
-        lambda _benchmark, _override=None: False,
-    )
-
-    def capture_selection(question_dicts, _tasks_dir, *, pipeline_id: str) -> None:
-        assert pipeline_id == "stateful-react-agent"
-        selected_runs.append([question["id"] for question in question_dicts])
-        raise _SelectionCaptured
-
-    monkeypatch.setattr(
-        harbor_task_generator,
-        "generate_task_dirs",
-        capture_selection,
-    )
-
-    args = argparse.Namespace(
-        benchmark="sample",
-        pipeline=None,
-        web=None,
-        limit=5,
-        offset=2,
-        answer_type=None,
-        category=None,
-        no_shuffle=False,
-        profile="default",
-        fs_mode=False,
-    )
-
-    for seed in (42, 1234):
-        with pytest.raises(_SelectionCaptured):
-            await run_subprocess.run_eval(
-                args,
-                out_dir=tmp_path / str(seed),
-                seed=seed,
-            )
-
-    assert all("limit" not in call for call in load_calls)
-    assert len(selected_runs[0]) == len(selected_runs[1]) == args.limit
-    assert set(selected_runs[0]) != set(selected_runs[1])
-
-
-@pytest.mark.asyncio
-async def test_runner_limit_preserves_order_when_shuffle_is_disabled(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    ("seed", "no_shuffle", "expected_ids"),
+    [
+        (42, False, ["q19", "q05", "q14", "q04", "q09"]),
+        (1234, False, ["q19", "q13", "q04", "q09", "q16"]),
+        (42, True, ["q00", "q01", "q02", "q03", "q04"]),
+    ],
+    ids=["seed-42", "seed-1234", "no-shuffle"],
+)
+async def test_runner_selects_questions_after_optional_shuffle(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    seed: int,
+    no_shuffle: bool,
+    expected_ids: list[str],
 ) -> None:
     from benchmarks.public import sandbox_profiles
     from benchmarks.public.core import harbor_task_generator, registry
@@ -114,11 +57,13 @@ async def test_runner_limit_preserves_order_when_shuffle_is_disabled(
             name="Sample",
         ),
     )
-    monkeypatch.setattr(
-        registry,
-        "load_questions",
-        lambda _benchmark, **_kwargs: source.copy(),
-    )
+
+    def load_questions(
+        _benchmark: str, *, limit: int | None = None, **_kwargs: object
+    ) -> list[BenchmarkQuestion]:
+        return source[:limit] if limit else source.copy()
+
+    monkeypatch.setattr(registry, "load_questions", load_questions)
     monkeypatch.setattr(
         sandbox_profiles,
         "resolve_closed_book",
@@ -144,12 +89,12 @@ async def test_runner_limit_preserves_order_when_shuffle_is_disabled(
         offset=2,
         answer_type=None,
         category=None,
-        no_shuffle=True,
+        no_shuffle=no_shuffle,
         profile="default",
         fs_mode=False,
     )
 
     with pytest.raises(_SelectionCaptured):
-        await run_subprocess.run_eval(args, out_dir=tmp_path, seed=42)
+        await run_subprocess.run_eval(args, out_dir=tmp_path, seed=seed)
 
-    assert selected == [question.id for question in source[: args.limit]]
+    assert selected == expected_ids
