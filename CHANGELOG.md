@@ -33,3 +33,8 @@ Initial open-source release of FrontierAgent.
   inside the configured context window.
 - Clean-machine Linux + NVIDIA installation and release-certification guide,
   distinguishing deployment health from production agent correctness.
+
+### Fixed
+
+- Apply benchmark question limits after seeded shuffling so repeated runs can
+  sample different questions while `--no-shuffle` keeps canonical ordering.
