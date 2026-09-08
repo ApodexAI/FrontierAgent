@@ -27,7 +27,12 @@ from functools import cache
 from pathlib import Path
 from typing import Any
 
-from apodex.config import ModelConfig, RuntimeConfigStatus, inspect_runtime_config
+from apodex.config import (
+    ModelConfig,
+    RuntimeConfigStatus,
+    apply_closed_book_filter,
+    inspect_runtime_config,
+)
 from frontier_agent.infra.providers import environment_variable_source
 
 _PKG_DIR = Path(__file__).resolve().parent
@@ -120,9 +125,21 @@ class AgentProfile:
         ``declared_tools``: dispatch hands the run to the native workflow, whose
         own profile carries the allowlists. Reading the top-level list would
         report on tools that are not bound and miss tools that are.
+
+        Closed-book env flags (``REACT_NO_WEB`` / ``SWARM_NO_WEB``) drop the
+        web tools before they are bound at runtime, so they are dropped here
+        too — otherwise the preflight warns about credentials for tools that
+        will not run. The raw workflow read stays cached; only this filtering
+        re-reads the live environment per access.
         """
         if self.workflow:
-            return _workflow_tool_names(self.workflow, self.workflow_profile or "")
+            raw = _workflow_tool_names(self.workflow, self.workflow_profile or "")
+            effective = apply_closed_book_filter(
+                raw, workflow=self.workflow, mode=self.name, env=os.environ,
+            )
+            # Preserve the workflow profile's order, not the frozenset order.
+            keep = set(effective)
+            return tuple(t for t in raw if t in keep)
         return self.declared_tools
 
     def runtime_config(

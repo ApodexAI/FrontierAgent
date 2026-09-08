@@ -117,6 +117,10 @@ def test_workflow_modes_expose_the_tools_their_workflow_profile_binds(monkeypatc
     monkeypatch.setenv("OPENAI_API_KEY", "test")
     monkeypatch.setenv("OPENAI_BASE_URL", "https://example.test/v1")
     monkeypatch.setenv("OPENAI_MODEL", "test-model")
+    # ``tool_names`` drops web tools under closed-book flags; this test pins
+    # the open-book union, so make sure the flags are off.
+    monkeypatch.delenv("REACT_NO_WEB", raising=False)
+    monkeypatch.delenv("SWARM_NO_WEB", raising=False)
 
     repo = pathlib.Path(P.__file__).resolve().parents[2]
     for mode in ("react", "agent_team"):

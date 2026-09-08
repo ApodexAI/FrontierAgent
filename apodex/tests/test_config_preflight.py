@@ -116,13 +116,17 @@ def test_search_credentials_are_checked_when_the_profile_binds_the_web_tools():
     assert no_web_tools.ok and not no_web_tools.warnings
 
 
-def test_every_selectable_terminal_mode_preflights_its_search_credentials():
+def test_every_selectable_terminal_mode_preflights_its_search_credentials(monkeypatch):
     """The check used to key on ``research``, a mode the CLI cannot select.
 
     Both shipped modes bind web_search, so a blank SERPER_API_KEY reached the
     model as an error string inside a tool result instead of failing preflight.
     """
     from apodex.profiles import get_profile, terminal_mode_names
+
+    # Open-book baseline: closed-book flags would legitimately drop web_search.
+    monkeypatch.delenv("REACT_NO_WEB", raising=False)
+    monkeypatch.delenv("SWARM_NO_WEB", raising=False)
 
     cfg = ModelConfig(model="gpt-test", api_key="secret", base_url="https://api.test/v1")
     modes = terminal_mode_names()
@@ -134,6 +138,96 @@ def test_every_selectable_terminal_mode_preflights_its_search_credentials():
         assert "missing_serper_api_key" in [i.code for i in status.warnings], mode
         # Warned about, never refused a startup.
         assert status.ok, mode
+
+
+def test_closed_book_env_suppresses_search_credential_warnings():
+    """REACT_NO_WEB / SWARM_NO_WEB drop web tools at runtime, so the preflight
+    must not warn about credentials for tools that will not run."""
+    cfg = ModelConfig(model="gpt-test", api_key="secret", base_url="https://api.test/v1")
+
+    # Mode-routed: a workflow-less fake profile still filters via ``mode``.
+    react_closed = inspect_runtime_config(
+        cfg,
+        profile=_profile(tool_names=_WEB_TOOLS),
+        mode="react",
+        environ={"REACT_NO_WEB": "1"},
+    )
+    assert react_closed.ok and not react_closed.warnings
+
+    swarm_closed = inspect_runtime_config(
+        cfg,
+        profile=_profile(tool_names=_WEB_TOOLS),
+        mode="agent_team",
+        environ={"SWARM_NO_WEB": "true"},
+    )
+    assert swarm_closed.ok and not swarm_closed.warnings
+
+    # Flags are workflow-specific: the other workflow's flag changes nothing.
+    react_wrong_flag = inspect_runtime_config(
+        cfg,
+        profile=_profile(tool_names=_WEB_TOOLS),
+        mode="react",
+        environ={"SWARM_NO_WEB": "1"},
+    )
+    assert [i.code for i in react_wrong_flag.warnings] == [
+        "missing_serper_api_key", "missing_jina_api_key",
+    ]
+
+    swarm_wrong_flag = inspect_runtime_config(
+        cfg,
+        profile=_profile(tool_names=_WEB_TOOLS),
+        mode="agent_team",
+        environ={"REACT_NO_WEB": "1"},
+    )
+    assert [i.code for i in swarm_wrong_flag.warnings] == [
+        "missing_serper_api_key", "missing_jina_api_key",
+    ]
+
+    # Unknown modes have no closed-book gate: the generic loop still binds web
+    # tools, so the warnings stay even when a flag is set.
+    generic = inspect_runtime_config(
+        cfg,
+        profile=_profile(tool_names=_WEB_TOOLS),
+        mode="coding",
+        environ={"REACT_NO_WEB": "1", "SWARM_NO_WEB": "1"},
+    )
+    assert [i.code for i in generic.warnings] == [
+        "missing_serper_api_key", "missing_jina_api_key",
+    ]
+
+
+def test_closed_book_filtering_covers_both_shipped_modes(monkeypatch):
+    """End-to-end over the real workflow profiles: with the flag set, the
+    effective ``tool_names`` drop the web tools and the preflight stays quiet;
+    without it, both modes still warn."""
+    import apodex.profiles as P
+    from apodex.profiles import get_profile
+
+    P._CACHE.clear()
+    P._workflow_tool_names.cache_clear()
+    monkeypatch.delenv("REACT_NO_WEB", raising=False)
+    monkeypatch.delenv("SWARM_NO_WEB", raising=False)
+
+    cfg = ModelConfig(model="gpt-test", api_key="secret", base_url="https://api.test/v1")
+
+    for mode, flag in (("react", "REACT_NO_WEB"), ("agent_team", "SWARM_NO_WEB")):
+        profile = get_profile(mode)
+        # Open-book: web tools bound, credentials warned about.
+        assert "web_search" in profile.tool_names, mode
+        assert "web_fetch" in profile.tool_names, mode
+        status = inspect_runtime_config(cfg, profile=profile, mode=mode, environ={})
+        assert "missing_serper_api_key" in [i.code for i in status.warnings], mode
+        assert "missing_jina_api_key" in [i.code for i in status.warnings], mode
+
+        # Closed-book via the live environment (what ``tool_names`` reads).
+        monkeypatch.setenv(flag, "1")
+        try:
+            assert "web_search" not in profile.tool_names, mode
+            assert "web_fetch" not in profile.tool_names, mode
+            closed = inspect_runtime_config(cfg, profile=profile, mode=mode)
+            assert closed.ok and not closed.warnings, mode
+        finally:
+            monkeypatch.delenv(flag, raising=False)
 
 
 def test_cli_fails_before_session_construction_with_actionable_guidance(
