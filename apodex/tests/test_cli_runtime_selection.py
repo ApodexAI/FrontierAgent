@@ -46,3 +46,63 @@ def test_macos_bwrap_never_detours_through_the_container(
     assert cli.main(["--bwrap"]) == 2
     assert macos == []
     assert "no bubblewrap here" in capsys.readouterr().err
+
+
+def test_macos_global_install_with_docker_but_no_image_fails_closed(
+    monkeypatch, tmp_path, capsys,
+) -> None:
+    """A wheel on a Mac with Docker running must not quietly go native.
+
+    The platform default promised a container. With no image and no checkout
+    to build one from, the honest outcome is a stop that names the options,
+    not a native run the user never asked for.
+    """
+    from apodex import docker
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli.sys, "platform", "darwin")
+    monkeypatch.setattr("apodex.docker.docker_available", lambda: (True, "available"))
+    monkeypatch.setattr(docker, "image_exists", lambda image: False)
+    monkeypatch.setattr(docker, "_REPO_ROOT", tmp_path / "site-packages")
+    monkeypatch.delenv(docker.BUILD_CONTEXT_VAR, raising=False)
+    monkeypatch.setattr(
+        docker.subprocess, "run",
+        lambda *a, **k: pytest.fail("no docker command may run without an image"),
+    )
+    monkeypatch.setattr(
+        "apodex.native.prepare_native_runtime",
+        lambda *a, **k: pytest.fail("must not fall back to the native runtime"),
+    )
+
+    assert cli.main([]) == 1
+
+    err = capsys.readouterr().err
+    assert "cannot use the Docker path" in err
+    assert docker.BUILD_CONTEXT_VAR in err
+    assert "--native" in err
+
+
+def test_macos_container_launch_forwards_the_resolved_environment(
+    monkeypatch, tmp_path,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli.sys, "platform", "darwin")
+    monkeypatch.setattr("apodex.docker.docker_available", lambda: (True, "available"))
+    seen: dict[str, object] = {}
+
+    def _record(argv, **kwargs):
+        seen["argv"] = list(argv)
+        seen["forward_env"] = tuple(kwargs.get("forward_env", ()))
+        return 0
+
+    monkeypatch.setattr("apodex.docker.run_in_container", _record)
+    (tmp_path / ".env").write_text("OPENAI_MODEL=project-model\n", encoding="utf-8")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-exported")
+    monkeypatch.delenv("OPENAI_MODEL", raising=False)
+
+    assert cli.main(["--docker", "-p", "hi"]) == 0
+
+    assert seen["argv"] == ["-p", "hi"]
+    assert "OPENAI_MODEL" in seen["forward_env"]     # from the launch .env
+    assert "OPENAI_API_KEY" in seen["forward_env"]   # exported
+    assert all("sk-exported" not in name for name in seen["forward_env"])

@@ -34,7 +34,25 @@ Initial open-source release of FrontierAgent.
 - Clean-machine Linux + NVIDIA installation and release-certification guide,
   distinguishing deployment health from production agent correctness.
 
+- Standalone installation with `uv tool install`: the wheel now ships the
+  provider registry, and `frontier-agent` runs from any directory without a
+  checkout. An optional user env file (`$XDG_CONFIG_HOME/apodex/env`, default
+  `~/.config/apodex/env`, override with `APODEX_ENV_FILE`) holds the endpoint
+  below exported variables and the launch directory's `.env`; a key defined
+  next to a base URL is only applied together with that base URL.
+- `APODEX_BUILD_CONTEXT` names a checkout to build `apodex:local` from when the
+  installed CLI is not one. Without an image, a checkout, or an explicit
+  `APODEX_IMAGE`, the Docker path stops with the options instead of silently
+  running natively.
+
 ### Fixed
 
+- Native mode puts the CLI's own Python environment ahead of the inherited
+  `PATH`, so `read_file`, `download_file`, and `python3` inside `bash` use the
+  interpreter the CLI was installed with rather than a system Python.
+- The Docker launcher forwards the resolved runtime variables (exported
+  environment, launch directory `.env`, user env file) into the container by
+  name with `docker run -e NAME`, so an exported value now takes precedence over
+  the checkout's `.env` inside the container as it already did natively.
 - Apply benchmark question limits after seeded shuffling so repeated runs can
   sample different questions while `--no-shuffle` keeps canonical ordering.

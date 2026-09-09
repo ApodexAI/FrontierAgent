@@ -11,10 +11,20 @@ What crosses the boundary, and nothing else:
 - a dedicated ``.apodex/runs/<session-id>/outputs`` directory, read-write at
   ``/outputs``;
 - ``~/.apodex`` (session history, traces), so ``--resume`` works across runs;
-- ``.env`` from the repo, for model and search credentials.
+- ``.env`` from the repo, for model and search credentials, plus the resolved
+  runtime variables the host CLI loaded (exported environment, the launch
+  directory's ``.env``, the user env file) — forwarded by *name* with
+  ``-e NAME`` so Docker reads each value from the process environment and no
+  secret ever lands on a command line.
 
 The image is built on first use and reused after that. It is the same
 ``Dockerfile`` the benchmark runner uses, so there is one image to maintain.
+Building needs a source checkout: a wheel installed with ``uv tool install``
+carries no Dockerfile. Outside a checkout the launcher uses an image that is
+already present, pulls an explicitly requested ``APODEX_IMAGE``, or builds
+from the checkout named by ``APODEX_BUILD_CONTEXT`` — and otherwise stops
+with the options spelled out rather than quietly running without the
+boundary the platform default promised.
 """
 from __future__ import annotations
 
@@ -24,12 +34,34 @@ import re
 import shutil
 import subprocess
 import sys
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 _DEFAULT_IMAGE = "apodex:local"
 IMAGE = os.environ.get("APODEX_IMAGE", _DEFAULT_IMAGE)
 _REPO_ROOT = Path(__file__).resolve().parents[1]
+BUILD_CONTEXT_VAR = "APODEX_BUILD_CONTEXT"
+
+
+class BuildContextUnavailable(RuntimeError):
+    """No directory with a Dockerfile to build the default image from."""
+
+
+def build_context(environ: Mapping[str, str] | None = None) -> Path | None:
+    """The directory whose ``Dockerfile`` builds :data:`_DEFAULT_IMAGE`.
+
+    ``APODEX_BUILD_CONTEXT`` names it explicitly (a FrontierAgent checkout, for
+    an installation that lives elsewhere). Otherwise it is this package's own
+    repository root when that is a checkout. ``None`` for a wheel installed
+    outside any checkout: ``site-packages`` has no Dockerfile.
+    """
+    env = os.environ if environ is None else environ
+    override = (env.get(BUILD_CONTEXT_VAR) or "").strip()
+    if override:
+        return Path(override).expanduser()
+    if (_REPO_ROOT / "Dockerfile").is_file():
+        return _REPO_ROOT
+    return None
 
 
 def terminal_env(environ: Mapping[str, str]) -> list[str]:
@@ -122,19 +154,47 @@ def image_exists(image: str = IMAGE) -> bool:
     return probe.returncode == 0
 
 
-def build_image(image: str = IMAGE, *, quiet: bool = False) -> None:
+def build_image(
+    image: str = IMAGE, *, quiet: bool = False, context: Path | None = None,
+) -> None:
     """Build the image from the repo Dockerfile.
 
     Streams the build output: it takes minutes the first time (LibreOffice and
     the document readers are large), and a silent multi-minute wait reads as a
-    hang.
+    hang. Raises :class:`BuildContextUnavailable` when there is no checkout
+    to build from; the caller turns that into user-facing guidance.
     """
-    print(f"apodex: building {image} (first run only, this takes a few minutes)…",
-          file=sys.stderr)
-    cmd = ["docker", "build", "-t", image, str(_REPO_ROOT)]
+    root = context if context is not None else build_context()
+    if root is None:
+        raise BuildContextUnavailable(
+            f"{image} is not present locally, and this installation is not a "
+            "source checkout, so it cannot be built here"
+        )
+    if not (root / "Dockerfile").is_file():
+        raise BuildContextUnavailable(
+            f"{BUILD_CONTEXT_VAR}={root} does not contain a Dockerfile"
+        )
+    print(f"apodex: building {image} from {root} (first run only, this takes a "
+          "few minutes)…", file=sys.stderr)
+    cmd = ["docker", "build", "-t", image, str(root)]
     if quiet:
         cmd.insert(2, "--quiet")
     subprocess.run(cmd, check=True)
+
+
+def _build_unavailable_message(reason: str) -> str:
+    return (
+        f"apodex: cannot use the Docker path — {reason}.\n"
+        "        Choose one:\n"
+        "          docker build -t apodex:local /path/to/FrontierAgent   "
+        "(build once from a checkout)\n"
+        f"          export {BUILD_CONTEXT_VAR}=/path/to/FrontierAgent      "
+        "(let this command build from it)\n"
+        "          export APODEX_IMAGE=<image you can pull>            "
+        "(use a registry image)\n"
+        "          frontier-agent --native …                            "
+        "(workspace-local host runtime, not an OS sandbox)"
+    )
 
 
 def pull_image(image: str) -> bool:
@@ -148,9 +208,19 @@ def pull_image(image: str) -> bool:
 
 
 def run_in_container(
-    argv: list[str], *, cwd: str | None = None, image: str = IMAGE,
+    argv: list[str],
+    *,
+    cwd: str | None = None,
+    image: str = IMAGE,
+    forward_env: Sequence[str] = (),
 ) -> int:
-    """Re-exec ``apodex argv`` inside the container. Returns its exit code."""
+    """Re-exec ``apodex argv`` inside the container. Returns its exit code.
+
+    ``forward_env`` names host variables to carry inward (``-e NAME``, value
+    read by Docker from this process's environment). It is how an exported
+    key, a launch-directory ``.env`` or the user env file reach a run that the
+    checkout's ``--env-file`` alone would not cover.
+    """
     ok, why = docker_available()
     if not ok:
         print(
@@ -168,6 +238,9 @@ def run_in_container(
         if image == _DEFAULT_IMAGE:
             try:
                 build_image(image)
+            except BuildContextUnavailable as exc:
+                print(_build_unavailable_message(str(exc)), file=sys.stderr)
+                return 1
             except subprocess.CalledProcessError as exc:
                 print(f"apodex: image build failed (exit {exc.returncode}).",
                       file=sys.stderr)
@@ -312,6 +385,13 @@ def run_in_container(
     env_file = _REPO_ROOT / ".env"
     if env_file.is_file():
         docker_cmd += ["--env-file", str(env_file)]
+    # Name only: ``-e NAME`` makes Docker read the value from this process's
+    # environment, so the resolved key is never an argv token. Ordering after
+    # --env-file is what lets the host-resolved value win over the checkout's
+    # file, matching the exported-environment precedence native runs have.
+    for name in dict.fromkeys(forward_env):
+        if name in os.environ:
+            docker_cmd += ["-e", name]
     docker_cmd += [image, "apodex", *_without_cwd_arg(argv)]
 
     try:

@@ -7,8 +7,40 @@ operating-system security boundary.
 from __future__ import annotations
 
 import os
+import sys
 from collections.abc import MutableMapping
 from pathlib import Path
+
+
+def _interpreter_bin_dir(inherited_path: str) -> Path | None:
+    """The CLI interpreter's ``bin`` directory, to lead the inherited PATH.
+
+    Native mode promises that the CLI's own Python environment is what
+    ``python3`` means to the tools (``read_file`` and ``download_file`` pipe
+    their helpers to ``python3 -``; the model's ``bash`` heredocs do the same).
+    From a checkout, ``uv run`` puts the venv first on PATH and the promise
+    holds by accident. An installation made with ``uv tool install`` exposes
+    only ``frontier-agent``/``apodex`` on PATH, so ``python3`` fell through to
+    whatever the system ships — on macOS a 3.9 that cannot even parse the
+    readers.
+
+    ``sys.executable`` is used *unresolved* on purpose: a venv's ``bin/python``
+    is a symlink to the base interpreter, and following it would name the base
+    installation's ``bin`` — the wrong environment, without the CLI's
+    dependencies. Only the directory itself is normalised. ``None`` when the
+    directory already leads the inherited PATH, so the ``uv run`` case keeps
+    its PATH byte-for-byte.
+    """
+    executable = sys.executable
+    if not executable:
+        return None
+    bin_dir = Path(os.path.abspath(os.path.dirname(executable)))
+    if not bin_dir.is_dir():
+        return None
+    first = inherited_path.split(os.pathsep, 1)[0].strip() if inherited_path else ""
+    if first and os.path.abspath(first) == str(bin_dir):
+        return None
+    return bin_dir
 
 
 def prepare_native_runtime(
@@ -69,6 +101,9 @@ def prepare_native_runtime(
         dependencies / "cargo" / "bin",
     ]
     native_path = os.pathsep.join(str(path) for path in native_bins)
+    interpreter_bin = _interpreter_bin_dir(inherited_path)
+    if interpreter_bin is not None:
+        native_path = f"{native_path}{os.pathsep}{interpreter_bin}"
     if inherited_path:
         native_path = f"{native_path}{os.pathsep}{inherited_path}"
 

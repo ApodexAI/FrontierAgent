@@ -67,8 +67,18 @@ is enough.
 
 ## Install and run
 
-Run from the repository root, so `frontier_agent`, `plugins` and `workflows`
-import:
+Two ways to install. As a standalone tool, so the command works from any
+directory:
+
+```bash
+uv tool install --python 3.12 git+https://github.com/ApodexAI/FrontierAgent.git
+# credentials in ${XDG_CONFIG_HOME:-$HOME/.config}/apodex/env, or exported;
+# see docs/install/global-install.md
+cd /path/to/your/repo && frontier-agent
+```
+
+Or from a checkout, run from the repository root so `frontier_agent`,
+`plugins` and `workflows` import from the source tree:
 
 ```bash
 uv sync
@@ -119,14 +129,24 @@ attached through the same session input manager; ordinary text is inserted into
 the prompt. `Cmd+V` remains the terminal's normal text paste shortcut.
 
 This is a local, open-source BYOK tool: there is no account or `login` command.
-Keys stay in your environment or local `.env`; the TUI never asks for or displays
-them. Startup validates the local configuration before opening the TUI, and
+Keys stay in your environment, a local `.env`, or the optional user file
+`$XDG_CONFIG_HOME/apodex/env` (default `~/.config/apodex/env`, override with
+`APODEX_ENV_FILE`); the TUI never asks for or displays them. Precedence is CLI
+options, then exported variables, then the launch directory's `.env`, then the
+user file. The user file is read literally, without `${VAR}` expansion, and a
+key it defines next to a base URL is only applied together with that base URL.
+Startup validates the local configuration before opening the TUI, and
 `/config` shows only safe diagnostics such as provider, model, endpoint host and
 whether the required key is configured.
 
 The first `--docker` run builds the image, which takes a few minutes
 (LibreOffice and the document readers are large); later runs reuse it.
-`APODEX_IMAGE` overrides the tag.
+`APODEX_IMAGE` overrides the tag. Building needs a source checkout. A tool
+installed with `uv tool install` has none, so it uses an image that is already
+present, builds from the clone named by `APODEX_BUILD_CONTEXT`, or pulls an
+explicit `APODEX_IMAGE`; with none of those it stops and lists the options
+instead of running natively unannounced. Configured variables cross into the
+container by name (`docker run -e NAME`), never as values on the command line.
 
 On Linux, native mode is the default. On macOS, Docker remains preferred when
 its daemon is reachable, with automatic fallback to native mode. Native mode

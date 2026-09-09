@@ -7,6 +7,7 @@ from pathlib import Path
 from apodex import cli, docker, sandbox
 from apodex.native import prepare_native_runtime
 from apodex.sandbox import BWRAP, CONTAINER, NATIVE, Strategy, resolve_strategy
+from apodex.userenv import EnvResolution
 from plugins.tools._sandbox import resolve_runtime_path
 
 
@@ -51,6 +52,78 @@ def test_native_runtime_keeps_mutable_state_under_workspace(tmp_path) -> None:
         "FRONTIER_AGENT_OUTPUTS_DIR", "PIP_TARGET",
     ):
         assert Path(env[key]).is_dir()
+
+
+def _venv_bin() -> str:
+    """The running interpreter's bin dir, unresolved (a venv's python is a symlink)."""
+    import sys
+
+    return os.path.abspath(os.path.dirname(sys.executable))
+
+
+def test_native_path_leads_with_the_cli_interpreter_for_a_global_install(tmp_path) -> None:
+    """``python3`` inside tools must be the CLI's environment, not the system's.
+
+    A ``uv tool install`` puts only the console scripts on PATH. Without this,
+    read_file's ``python3 -`` helper ran under whatever ``/usr/bin/python3``
+    is — a 3.9 on macOS, which fails on ``X | None`` at parse time.
+    """
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+    env: dict[str, str] = {"PATH": "/usr/bin:/bin"}
+
+    root = prepare_native_runtime(str(workspace), "20260806-120000-react-ab12", environ=env)
+
+    entries = env["PATH"].split(os.pathsep)
+    assert _venv_bin() in entries
+    # After the workspace-local bins, before whatever the shell had.
+    assert entries.index(_venv_bin()) > entries.index(str(root / "home" / ".local" / "bin"))
+    assert entries.index(_venv_bin()) < entries.index("/usr/bin")
+
+
+def test_native_path_is_unchanged_when_the_interpreter_already_leads_it(tmp_path) -> None:
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+    inherited = f"{_venv_bin()}:/opt/homebrew/bin:/usr/bin"
+    env: dict[str, str] = {"PATH": inherited}
+
+    prepare_native_runtime(str(workspace), "20260806-120000-react-ab12", environ=env)
+
+    # The checkout / ``uv run`` case: exactly one copy, in its original place.
+    assert env["PATH"].endswith(inherited)
+    assert env["PATH"].count(_venv_bin()) == 1
+
+
+def test_native_python3_is_the_cli_environment_even_behind_a_decoy(tmp_path) -> None:
+    """A subprocess probe: the PATH really selects the CLI's interpreter.
+
+    The inherited PATH leads with a directory whose ``python3`` is a decoy, the
+    shape of a system or Homebrew interpreter sitting in front of the tool
+    environment. ``sys.prefix`` and a dependency the CLI environment has and a
+    bare interpreter does not (textual) prove which one answered.
+    """
+    import subprocess
+    import sys
+
+    decoy_bin = tmp_path / "decoy-bin"
+    decoy_bin.mkdir()
+    decoy = decoy_bin / "python3"
+    decoy.write_text("#!/bin/sh\necho DECOY\n", encoding="utf-8")
+    decoy.chmod(0o755)
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+    env: dict[str, str] = {"PATH": f"{decoy_bin}:/usr/bin:/bin"}
+
+    prepare_native_runtime(str(workspace), "20260806-120000-react-ab12", environ=env)
+
+    probe = subprocess.run(
+        ["/bin/sh", "-c", "python3 -c 'import sys, textual; print(sys.prefix)'"],
+        env={"PATH": env["PATH"], "HOME": env["HOME"]},
+        capture_output=True, text=True, check=False,
+    )
+    assert probe.returncode == 0, probe.stderr
+    assert probe.stdout.strip() == sys.prefix
+    assert "DECOY" not in probe.stdout
 
 
 def test_native_strategy_is_explicitly_not_os_isolated() -> None:
@@ -204,7 +277,7 @@ def test_macos_falls_back_to_native_when_docker_is_unavailable(
 ) -> None:
     prepared: list[tuple[str, str]] = []
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(cli, "_load_env", lambda: None)
+    monkeypatch.setattr(cli, "_load_env", EnvResolution.empty)
     monkeypatch.setattr(cli.sys, "platform", "darwin")
     monkeypatch.setattr(
         docker, "docker_available", lambda: (False, "daemon is stopped"),
@@ -244,7 +317,7 @@ def test_linux_uses_native_runtime_by_default(
 ) -> None:
     prepared: list[tuple[str, str]] = []
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(cli, "_load_env", lambda: None)
+    monkeypatch.setattr(cli, "_load_env", EnvResolution.empty)
     monkeypatch.setattr(cli.sys, "platform", "linux")
     monkeypatch.delenv("APODEX_SANDBOX", raising=False)
     monkeypatch.delenv("SANDBOX_BACKEND", raising=False)
@@ -271,7 +344,7 @@ def test_linux_bwrap_is_explicit_and_skips_native_runtime(
     prepared: list[tuple[str, str]] = []
     requested: list[str | None] = []
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(cli, "_load_env", lambda: None)
+    monkeypatch.setattr(cli, "_load_env", EnvResolution.empty)
     monkeypatch.setattr(cli.sys, "platform", "linux")
     monkeypatch.setattr(
         "apodex.native.prepare_native_runtime",
