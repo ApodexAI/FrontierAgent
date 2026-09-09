@@ -12,7 +12,8 @@ The open track contains the 81 tasks that use the redistributable image:
 ./scripts/run_eval.sh --agent claude-code --model <model>
 ```
 
-The full track adds 16 ORCA tasks. Prepare the licensed local runtime first:
+The full track adds 16 tasks that execute ORCA. Prepare the licensed local
+runtime first:
 
 ```bash
 ./scripts/build_orca_runtime.sh --orca-root /path/to/orca-6.0.1
@@ -22,6 +23,10 @@ The full track adds 16 ORCA tasks. Prepare the licensed local runtime first:
 
 Setup writes verified local paths under `.frontierchallenge/`. The runner
 validates the GitHub/solve/reference registries again before staging anything.
+Track membership follows each task's declared execution environment, not
+software names in its instruction or supplied files. Thus
+`task_098_orca_claisen_thermochemistry`, which only reads precomputed ORCA
+output, remains an open-track task.
 
 ## Runtime
 
