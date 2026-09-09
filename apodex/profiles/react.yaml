@@ -15,5 +15,8 @@ llm:
   context_window: ${OPENAI_CONTEXT_WINDOW:-262144}
 # Turn budgets live in the selected workflow profile. ``agent.max_turns`` here
 # would configure apodex's generic loop, which workflow dispatch does not run.
-tools: [web_search, web_fetch, bash, grep_search, glob_search, read_file, todo_write]
+# No ``tools:`` here on purpose. Workflow dispatch never calls
+# ``profile.tools()``; the tools this mode binds are the allowlists in
+# workflows/stateful_react_agent/profiles/tui.yaml, and a second copy here
+# could only drift out of step with them.
 skills: []

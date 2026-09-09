@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import os
 import re
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
@@ -95,6 +95,65 @@ class RuntimeConfigStatus:
 _UNRESOLVED_ENV_RE = re.compile(r"\$(?:\{|[A-Z_])")
 
 
+# Tools a closed-book run never binds. Named once here so the preflight cannot
+# disagree with the runtime lists in ``workflows/stateful_react_agent/__init__.py``
+# and ``workflows/agent_team/__init__.py`` (both define the same frozenset as
+# ``WEB_TOOL_NAMES``) or with the profile-override filtering in
+# ``workflows/*/nodes/main_agent.py``.
+CLOSED_BOOK_WEB_TOOLS = frozenset({"web_search", "web_fetch", "download_file"})
+
+# Native workflow → the env flag that puts it in closed-book mode at runtime.
+_WORKFLOW_CLOSED_BOOK_ENV = {
+    "stateful-react-agent": "REACT_NO_WEB",
+    "agent_team": "SWARM_NO_WEB",
+}
+# Terminal mode → same flag (``inspect_runtime_config`` knows both the profile's
+# ``workflow`` and the active ``mode``; either one identifies the workflow).
+_MODE_CLOSED_BOOK_ENV = {
+    "react": "REACT_NO_WEB",
+    "agent_team": "SWARM_NO_WEB",
+}
+
+_CLOSED_BOOK_TRUTHY = ("1", "true", "yes", "on")
+
+
+def _is_closed_book(
+    *,
+    workflow: str | None = None,
+    mode: str | None = None,
+    env: Mapping[str, str],
+) -> bool:
+    """Whether the run drops web tools before they are bound.
+
+    Mirrors the runtime checks (``REACT_NO_WEB`` / ``SWARM_NO_WEB``); the
+    ``.strip().lower()`` normalization matches ``nodes/main_agent.py``.
+    Unknown workflows/modes never count as closed-book: the generic loop has
+    no such gate, so its web tools still run.
+    """
+    candidates = set()
+    if workflow in _WORKFLOW_CLOSED_BOOK_ENV:
+        candidates.add(_WORKFLOW_CLOSED_BOOK_ENV[workflow])  # type: ignore[index]
+    if mode in _MODE_CLOSED_BOOK_ENV:
+        candidates.add(_MODE_CLOSED_BOOK_ENV[mode])  # type: ignore[index]
+    return any(
+        str(env.get(var, "")).strip().lower() in _CLOSED_BOOK_TRUTHY
+        for var in candidates
+    )
+
+
+def apply_closed_book_filter(
+    tool_names: Iterable[str],
+    *,
+    workflow: str | None = None,
+    mode: str | None = None,
+    env: Mapping[str, str],
+) -> frozenset[str]:
+    """Drop closed-book web tools from ``tool_names`` when the env requests it."""
+    if _is_closed_book(workflow=workflow, mode=mode, env=env):
+        return frozenset(t for t in tool_names if t not in CLOSED_BOOK_WEB_TOOLS)
+    return frozenset(tool_names)
+
+
 def _configured(value: str | None) -> bool:
     stripped = (value or "").strip()
     return bool(stripped) and not _UNRESOLVED_ENV_RE.search(stripped)
@@ -147,25 +206,44 @@ def inspect_runtime_config(
                 env_var=profile.base_url_env,
             ))
 
-    if active_mode == "research":
-        if not _configured(env.get("SERPER_API_KEY")):
-            issues.append(RuntimeConfigIssue(
-                code="missing_serper_api_key",
-                message=(
-                    "SERPER_API_KEY is required in research mode because "
-                    "web_search cannot return results without it."
-                ),
-                env_var="SERPER_API_KEY",
-            ))
-        if not _configured(env.get("JINA_API_KEY")):
-            issues.append(RuntimeConfigIssue(
-                code="missing_jina_api_key",
-                message=(
-                    "JINA_API_KEY is missing; web_fetch will use its direct-fetch fallback."
-                ),
-                env_var="JINA_API_KEY",
-                blocking=False,
-            ))
+    # Gate the search credentials on the tools the profile actually binds, not
+    # on the mode name. Keying this on ``research`` meant it never fired: the
+    # terminal only exposes ``react`` and ``agent_team``, and both bind
+    # web_search and web_fetch, so a missing key first surfaced as an error
+    # string inside a tool result.
+    #
+    # Closed-book runs (REACT_NO_WEB / SWARM_NO_WEB) drop the web tools before
+    # they are bound, so filter them here too: warning about credentials for
+    # tools that will not run is a false positive. ``env`` is the same mapping
+    # used for the SERPER/JINA reads, so tests can drive this via ``environ=``.
+    tool_names = apply_closed_book_filter(
+        getattr(profile, "tool_names", ()) or (),
+        workflow=getattr(profile, "workflow", None),
+        mode=active_mode,
+        env=env,
+    )
+    if "web_search" in tool_names and not _configured(env.get("SERPER_API_KEY")):
+        issues.append(RuntimeConfigIssue(
+            code="missing_serper_api_key",
+            message=(
+                "SERPER_API_KEY is not set; web_search will return an error "
+                "instead of results for every query this session makes."
+            ),
+            env_var="SERPER_API_KEY",
+            # A warning, not a blocker: web_search is one of seven tools these
+            # profiles bind, so a local coding session has no use for the key
+            # and must not be refused a startup over it.
+            blocking=False,
+        ))
+    if "web_fetch" in tool_names and not _configured(env.get("JINA_API_KEY")):
+        issues.append(RuntimeConfigIssue(
+            code="missing_jina_api_key",
+            message=(
+                "JINA_API_KEY is missing; web_fetch will use its direct-fetch fallback."
+            ),
+            env_var="JINA_API_KEY",
+            blocking=False,
+        ))
 
     return RuntimeConfigStatus(
         mode=active_mode,
@@ -266,10 +344,12 @@ class UserSettings:
 
 
 __all__ = [
+    "CLOSED_BOOK_WEB_TOOLS",
     "ModelConfig",
     "RuntimeConfigIssue",
     "RuntimeConfigStatus",
     "UserSettings",
+    "apply_closed_book_filter",
     "format_preflight_errors",
     "format_runtime_config_status",
     "inspect_runtime_config",

@@ -514,8 +514,13 @@ async def _amain(argv: list[str] | None = None) -> int:
     if not runtime_config.ok:
         print(format_preflight_errors(runtime_config), file=sys.stderr)
         return 2
-    for warning in runtime_config.warnings:
-        print(f"warning: {warning.message}", file=sys.stderr)
+    # stderr is written moments before Textual takes the alternate screen, so a
+    # warning printed here is gone by the time the TUI is up. The TUI path
+    # carries them into the transcript instead; line mode prints as before.
+    startup_warnings = [warning.message for warning in runtime_config.warnings]
+    if not use_tui:
+        for message in startup_warnings:
+            print(f"warning: {message}", file=sys.stderr)
 
     session = TerminalSession(
         cfg=cfg,
@@ -545,6 +550,7 @@ async def _amain(argv: list[str] | None = None) -> int:
         app = FrontierAgentApp(
             session, resumed=resumed_state is not None,
             initial_task=args.task, theme=theme,
+            startup_warnings=startup_warnings,
         )
         _route_engine_logs(app.sink, session.session_id)
         await app.run_async()
