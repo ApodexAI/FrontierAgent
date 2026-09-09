@@ -1428,6 +1428,23 @@ def _check_ulimit_below_cgroup(mem_mb: int) -> None:
         )
 
 
+def _native_same_uid_is_expected() -> bool:
+    """True when local native execution intentionally uses the harness uid.
+
+    Native mode is explicitly not an OS sandbox: a normal non-root invocation
+    runs approved model commands with the current user's permissions.  Do not
+    route that expected case through the container/service tool-user warning
+    path.  Root-native and explicitly strict runs still attempt the dedicated
+    tool identity.
+    """
+    return (
+        os.environ.get("APODEX_IN_NATIVE", "").strip() == "1"
+        and os.name == "posix"
+        and os.geteuid() != 0
+        and not _require_tool_user()
+    )
+
+
 class _CurrentCommands:
     """Command executor for an existing checkout in the current process.
 
@@ -1438,8 +1455,10 @@ class _CurrentCommands:
 
     def __init__(self, workdir: str, *, private_tmp: bool = False) -> None:
         self._workdir = workdir
-        self._identity = tool_identity()
         native = os.environ.get("APODEX_IN_NATIVE", "").strip() == "1"
+        self._identity = (
+            None if _native_same_uid_is_expected() else tool_identity()
+        )
         self._runtime_home = (
             os.environ.get("HOME", "").strip() or workdir
             if native else workdir
@@ -2023,13 +2042,15 @@ class CurrentSandbox:
             self.commands = self._inner.commands
             self.files = self._inner.files
         else:
-            identity = tool_identity()
+            same_uid_expected = _native_same_uid_is_expected()
+            identity = None if same_uid_expected else tool_identity()
             if identity is None:
-                logger.warning(
-                    "CurrentSandbox running model commands with the harness's "
-                    "own uid: the child environment is scrubbed, but "
-                    "/proc/<harness-pid>/environ remains readable"
-                )
+                if not same_uid_expected:
+                    logger.warning(
+                        "CurrentSandbox running model commands with the harness's "
+                        "own uid: the child environment is scrubbed, but "
+                        "/proc/<harness-pid>/environ remains readable"
+                    )
             else:
                 _, outputs_dir, inputs_dir = resolve_mount_dirs()
                 _prepare_tool_writable(self._workdir, outputs_dir)
