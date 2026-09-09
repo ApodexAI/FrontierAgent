@@ -10,6 +10,7 @@ useful when changing that subsystem rather than when getting started.
 |---|---|
 | Understand the project and run a first task | [Project README](../README.md#quick-start) |
 | Run the TUI with an existing LLM endpoint | [English quickstart](install/tui-endpoint-quickstart.md) / [中文教程](install/tui-endpoint-quickstart.zh-CN.md) |
+| Install the CLI once and run it from any project | [Global install](install/global-install.md) |
 | Learn the TUI panes, previews, approvals, and live steering | [English user guide](tui-user-guide.md) / [中文使用教程](tui-user-guide.zh-CN.md) |
 | Install on any environment | [Installation and deployment](#installation-and-deployment) |
 | Run FrontierAgent from a container | [Docker and Compose](install/docker.md) |
@@ -27,6 +28,7 @@ container—instead of asking you to guess from the operating system alone.
 | Environment | Canonical guide |
 |---|---|
 | macOS or Linux, fastest hosted-endpoint TUI setup | [English quickstart](install/tui-endpoint-quickstart.md) / [中文教程](install/tui-endpoint-quickstart.zh-CN.md) |
+| macOS or Linux, one `uv tool install` and a bare `frontier-agent` in any project | [Global install](install/global-install.md) |
 | macOS, hosted or remote endpoint | [macOS](install/macos.md) / [中文详细版](install/macos.zh-CN.md) |
 | Linux, hosted or remote endpoint | [Linux](install/linux.md) |
 | Windows | [WSL2 section in the Linux guide](install/linux.md#windows-and-wsl2) |
@@ -117,6 +119,8 @@ second set of commands:
 
 - root `README.md`: product story, capabilities, short quick start, and results;
 - `docs/install/`: environment-specific installation and deployment;
+- `docs/install/global-install.md`: the `uv tool install` path, the user env
+  file and its precedence, and the Docker step for an installed tool;
 - `docs/install/docker.md`: Compose, image pinning, `docker run`, and cloud
   deployment of the CPU agent container;
 - `.env.example`: the runtime agent, web-tool, and document-reader variables,

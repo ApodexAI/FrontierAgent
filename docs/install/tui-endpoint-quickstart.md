@@ -256,6 +256,11 @@ After the first setup, continue to launch from the FrontierAgent repository:
 ./scripts/run-linux.sh --cwd /absolute/path/to/your-project
 ```
 
+If you would rather type `frontier-agent` inside the project itself, install
+the CLI once as a tool and keep the endpoint in the user env file. That setup,
+its precedence rules, and the extra Docker step on macOS are in
+[Install once and launch from any project](global-install.md).
+
 Next, read the [TUI user guide](../tui-user-guide.md) for the three sidebar tabs,
 Space previews, approvals, and Agent Team asynchronous intervention.
 

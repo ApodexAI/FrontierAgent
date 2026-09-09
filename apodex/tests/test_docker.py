@@ -331,3 +331,155 @@ def test_interactive_macos_container_receives_clipboard_broker(
     assert lifecycle == ["start", "close"]
     assert "APODEX_CLIPBOARD_BROKER_URL=http://host.docker.internal:43210" in calls[0]
     assert "APODEX_CLIPBOARD_BROKER_TOKEN=session-token" in calls[0]
+
+
+# ── outside a checkout: no Dockerfile to build from ──────────────────────
+
+
+def test_build_context_is_the_checkout_when_it_has_a_dockerfile(monkeypatch) -> None:
+    monkeypatch.delenv(docker.BUILD_CONTEXT_VAR, raising=False)
+    assert (docker._REPO_ROOT / "Dockerfile").is_file()
+
+    assert docker.build_context() == docker._REPO_ROOT
+
+
+def test_build_context_is_none_for_an_installed_wheel(monkeypatch, tmp_path) -> None:
+    site_packages = tmp_path / "site-packages"
+    site_packages.mkdir()
+    monkeypatch.setattr(docker, "_REPO_ROOT", site_packages)
+    monkeypatch.delenv(docker.BUILD_CONTEXT_VAR, raising=False)
+
+    assert docker.build_context() is None
+
+
+def test_explicit_build_context_names_a_checkout_to_build_from(monkeypatch, tmp_path) -> None:
+    checkout = tmp_path / "FrontierAgent"
+    checkout.mkdir()
+    (checkout / "Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
+    monkeypatch.setattr(docker, "_REPO_ROOT", tmp_path / "site-packages")
+    monkeypatch.setenv(docker.BUILD_CONTEXT_VAR, str(checkout))
+    builds: list[list[str]] = []
+    monkeypatch.setattr(
+        docker.subprocess, "run",
+        lambda command, check=False: builds.append(command) or SimpleNamespace(returncode=0),
+    )
+
+    docker.build_image("apodex:local")
+
+    assert builds == [["docker", "build", "-t", "apodex:local", str(checkout)]]
+
+
+def test_missing_default_image_outside_a_checkout_stops_with_the_options(
+    monkeypatch, tmp_path, capsys,
+) -> None:
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+    calls = _stub_container(monkeypatch, tmp_path)
+    monkeypatch.setattr(docker, "image_exists", lambda image: False)
+    monkeypatch.setattr(docker, "_REPO_ROOT", tmp_path / "site-packages")
+    monkeypatch.delenv(docker.BUILD_CONTEXT_VAR, raising=False)
+    monkeypatch.setattr(
+        docker, "pull_image",
+        lambda image: pytest.fail("the local default has no registry to pull from"),
+    )
+
+    assert docker.run_in_container(
+        [], cwd=str(workspace), image=docker._DEFAULT_IMAGE,
+    ) == 1
+
+    assert calls == []  # neither a build nor a container was attempted
+    err = capsys.readouterr().err
+    assert "not a source checkout" in err
+    assert "docker build -t apodex:local" in err
+    assert docker.BUILD_CONTEXT_VAR in err
+    assert "APODEX_IMAGE" in err
+    assert "--native" in err
+    assert "not an OS sandbox" in err
+
+
+def test_build_context_without_a_dockerfile_is_named_in_the_error(
+    monkeypatch, tmp_path, capsys,
+) -> None:
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+    calls = _stub_container(monkeypatch, tmp_path)
+    monkeypatch.setattr(docker, "image_exists", lambda image: False)
+    bad_context = tmp_path / "not-a-checkout"
+    bad_context.mkdir()
+    monkeypatch.setenv(docker.BUILD_CONTEXT_VAR, str(bad_context))
+
+    assert docker.run_in_container(
+        [], cwd=str(workspace), image=docker._DEFAULT_IMAGE,
+    ) == 1
+
+    assert calls == []
+    err = capsys.readouterr().err
+    assert f"{docker.BUILD_CONTEXT_VAR}={bad_context} does not contain a Dockerfile" in err
+
+
+def test_present_image_is_used_without_a_checkout(monkeypatch, tmp_path) -> None:
+    # An image built once from a checkout keeps working for a global install.
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+    calls = _stub_container(monkeypatch, tmp_path)
+    monkeypatch.setattr(docker, "_REPO_ROOT", tmp_path / "site-packages")
+    monkeypatch.delenv(docker.BUILD_CONTEXT_VAR, raising=False)
+    monkeypatch.setattr(
+        docker, "build_image", lambda *a, **k: pytest.fail("nothing to build"),
+    )
+
+    assert docker.run_in_container(
+        [], cwd=str(workspace), image=docker._DEFAULT_IMAGE,
+    ) == 0
+    assert len(calls) == 1
+    assert calls[0][:3] == ["docker", "run", "--rm"]
+
+
+# ── resolved host environment crosses the boundary by name ───────────────
+
+
+def test_forwarded_variables_travel_by_name_never_by_value(monkeypatch, tmp_path) -> None:
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+    calls = _stub_container(monkeypatch, tmp_path)
+    secret = "sk-forwarded-secret-1x2y"
+    monkeypatch.setenv("OPENAI_API_KEY", secret)
+    monkeypatch.setenv("OPENAI_MODEL", "forwarded-model")
+    monkeypatch.delenv("NOT_SET_ANYWHERE", raising=False)
+
+    assert docker.run_in_container(
+        [], cwd=str(workspace), image="test-image",
+        forward_env=("OPENAI_API_KEY", "OPENAI_MODEL", "NOT_SET_ANYWHERE", "OPENAI_API_KEY"),
+    ) == 0
+
+    command = calls[0]
+    image_at = command.index("test-image")
+    flags = command[:image_at]
+    assert flags.count("OPENAI_API_KEY") == 1          # deduplicated
+    assert flags[flags.index("OPENAI_API_KEY") - 1] == "-e"
+    assert "OPENAI_MODEL" in flags
+    assert "NOT_SET_ANYWHERE" not in flags             # unset names are skipped
+    assert secret not in " ".join(command)             # value never on argv
+    assert "forwarded-model" not in " ".join(command)
+
+
+def test_forwarded_names_follow_the_checkout_env_file(monkeypatch, tmp_path) -> None:
+    # ``-e NAME`` must come after ``--env-file`` so the host-resolved value
+    # (exported environment first) outranks the checkout's file, as it does
+    # for a native run.
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+    calls = _stub_container(monkeypatch, tmp_path)
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    (checkout / ".env").write_text("OPENAI_MODEL=file-model\n", encoding="utf-8")
+    monkeypatch.setattr(docker, "_REPO_ROOT", checkout)
+    monkeypatch.setenv("OPENAI_MODEL", "exported-model")
+
+    assert docker.run_in_container(
+        [], cwd=str(workspace), image="test-image", forward_env=("OPENAI_MODEL",),
+    ) == 0
+
+    command = calls[0]
+    assert command.index("--env-file") < command.index("OPENAI_MODEL")
+    assert command[command.index("--env-file") + 1] == str(checkout / ".env")

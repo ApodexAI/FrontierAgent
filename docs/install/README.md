@@ -11,6 +11,10 @@ on macOS or Linux, use the copy-and-run [English quickstart](tui-endpoint-quicks
 or [中文教程](tui-endpoint-quickstart.zh-CN.md). It does not deploy a model or
 require Docker.
 
+To install the command once and run `frontier-agent` from inside any project,
+without keeping a checkout around, use
+[Install once and launch from any project](global-install.md).
+
 ## Three questions
 
 1. **Do you need to run the model on a local NVIDIA GPU?**
@@ -32,6 +36,7 @@ require Docker.
 | Your environment | FrontierAgent | Model runtime | Guide |
 |---|---|---|---|
 | macOS laptop or desktop | native, optionally Docker | hosted/remote endpoint | [macOS](macos.md) |
+| macOS or Linux, the CLI as a globally installed tool | `uv tool install`, native or Docker | hosted/remote endpoint | [Global install](global-install.md) |
 | Linux laptop, server, or CI without a local model | `scripts/run-linux.sh` (native, bubblewrap, or Docker) | hosted/remote endpoint | [Linux](linux.md) |
 | Any host with Docker and no local Python environment | published agent container | hosted/remote endpoint | [Docker and Compose](docker.md) |
 | Linux bare metal or VM with an NVIDIA GPU and Docker daemon | native or agent container | SGLang container | [Linux NVIDIA + Docker](linux-nvidia.md) |

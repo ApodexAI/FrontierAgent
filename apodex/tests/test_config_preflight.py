@@ -15,6 +15,7 @@ from apodex.config import (
     format_runtime_config_status,
     inspect_runtime_config,
 )
+from apodex.userenv import EnvResolution
 
 
 def _profile(**overrides):
@@ -241,7 +242,7 @@ def test_cli_fails_before_session_construction_with_actionable_guidance(
     profile.runtime_config = lambda cfg, mode=None: inspect_runtime_config(
         cfg, profile=profile, mode=mode, environ={},
     )
-    monkeypatch.setattr(cli, "_load_env", lambda: None)
+    monkeypatch.setattr(cli, "_load_env", EnvResolution.empty)
     monkeypatch.setattr(cli, "terminal_mode_names", lambda: ["react", "agent_team"])
     monkeypatch.setattr(cli, "get_profile", lambda _mode: profile)
 
@@ -295,7 +296,7 @@ def test_resume_rejects_legacy_saved_mode_before_mutating_session(
 def test_cli_resume_rejects_legacy_saved_mode(tmp_path, monkeypatch):
     from apodex import session as session_module
 
-    monkeypatch.setattr(cli, "_load_env", lambda: None)
+    monkeypatch.setattr(cli, "_load_env", EnvResolution.empty)
     monkeypatch.setattr(cli, "terminal_mode_names", lambda: ["react", "agent_team"])
     monkeypatch.setattr(
         session_module,
