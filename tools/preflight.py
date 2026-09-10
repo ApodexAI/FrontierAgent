@@ -11,15 +11,37 @@ This makes a single 1-token call through the same code path first.
 Exits non-zero with the fix, not just the error. Secrets are never printed —
 only whether each key is set.
 """
+
 from __future__ import annotations
 
 import argparse
 import asyncio
+import importlib
 import os
 import sys
 from pathlib import Path
 
 AH = Path(__file__).resolve().parents[1]
+
+_REACT_PROFILE_API = (
+    "workflows.stateful_react_agent.profile",
+    "load_react_profile",
+    "create_react_llm",
+)
+_AGENT_TEAM_PROFILE_API = (
+    "workflows.agent_team.profile",
+    "load_swarm_profile",
+    "create_swarm_llm",
+)
+# Public pipeline IDs are registry keys, not importable package names. Keep the
+# compatibility rows in sync with the aliases registered by each workflow.
+_WORKFLOW_PROFILE_APIS: dict[str, tuple[str, str, str]] = {
+    "stateful-react-agent": _REACT_PROFILE_API,
+    "agent_team": _AGENT_TEAM_PROFILE_API,
+    "agent-team": _AGENT_TEAM_PROFILE_API,
+    "agent_team_report": _AGENT_TEAM_PROFILE_API,
+    "agent-team-report": _AGENT_TEAM_PROFILE_API,
+}
 
 
 def report_env() -> None:
@@ -30,6 +52,7 @@ def report_env() -> None:
     what the run will actually use.
     """
     from frontier_agent.infra.config import get_config
+
     c = get_config()
     print(f"  {'llm_provider':22} = {c.llm_provider or '<unset>'}")
     print(f"  {'openai_model':22} = {c.openai_model or '<unset>'}")
@@ -51,10 +74,11 @@ async def check_kernel_llm() -> str | None:
     """The LLM BenchmarkSession._bootstrap() builds from LLM_PROVIDER."""
     from frontier_agent.infra.config import get_config
     from frontier_agent.infra.llm_adapter import create_llm
+
     try:
         create_llm(get_config())
-    except ValueError as e:
-        if "Unknown LLM provider" in str(e):
+    except Exception as e:
+        if isinstance(e, ValueError) and "Unknown LLM provider" in str(e):
             return (
                 f"{e}\n"
                 f"      BenchmarkSession._bootstrap() builds a default LLM from\n"
@@ -63,20 +87,32 @@ async def check_kernel_llm() -> str | None:
                 f"      point OPENAI_BASE_URL / OPENAI_API_KEY / OPENAI_MODEL at the\n"
                 f"      endpoint you want (any OpenAI-compatible /v1 works)."
             )
-        return str(e)
+        return f"{type(e).__name__}: {e}"
     return None
 
 
 async def check_workflow_llm(pipeline: str, profile: str) -> str | None:
     """The LLM the workflow actually runs on, with the profile's sampling args."""
-    mod = f"workflows.{pipeline}.profile"
+    profile_api = _WORKFLOW_PROFILE_APIS.get(pipeline)
+    if profile_api is None:
+        return f"unknown pipeline {pipeline!r}; expected 'stateful-react-agent' or 'agent_team'"
+
+    module_name, loader_name, builder_name = profile_api
     try:
-        p = __import__(mod, fromlist=["load_profile", "create_llm"])
+        module = importlib.import_module(module_name)
     except ImportError as e:
-        return f"cannot import {mod}: {e}"
+        return f"cannot import {module_name}: {e}"
+
     try:
-        # create_llm takes the whole profile dict and reads profile["llm"] itself
-        llm = p.create_llm(p.load_profile(profile))
+        load_profile = getattr(module, loader_name)
+        create_llm = getattr(module, builder_name)
+    except AttributeError as e:
+        return f"profile API mismatch in {module_name}: {e}"
+
+    try:
+        # The workflow builders take the whole profile dict and read
+        # profile["llm"] themselves.
+        llm = create_llm(load_profile(profile))
     except Exception as e:
         return f"building the profile LLM failed: {type(e).__name__}: {e}"
 
