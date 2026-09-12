@@ -12,7 +12,10 @@ prefix across every ``&&``/``|``/``;`` segment, fail-safe), or a bare tool name
 Safety contract: this store only ever *downgrades a plain confirm to safe*, or
 *forces a deny*. It is consulted in :func:`agent_tools.assess_tool_risk` AFTER
 danger detection and the hard denylist — so a saved ``Bash(git)`` allow can
-never green-light a dangerous ``git push --force``.
+never green-light a dangerous ``git push --force``. Unquoted ``$(...)`` and
+backtick substitutions must be separately authorized against the same saved
+prefixes, and a command carrying a ``danger`` label never downgrades (the
+typed-confirmation gate still fires).
 """
 
 from __future__ import annotations
@@ -34,6 +37,84 @@ _SEGMENT_SPLIT = re.compile(r"&&|\|\||\||;")
 _HELPER_CMDS = frozenset({
     "cd", "pwd", "export", "set", "env", "echo", "mkdir", "clear", "true", "source", ".",
 })
+
+
+def _nested_shell_snippets(cmd: str) -> list[str]:
+    """Shell-code strings nested in unquoted ``$(...)``/backticks.
+
+    Reuses :func:`plugins.tools._bash_policy._extract_nested_shell` (stdlib-only,
+    no import cycle). Single-quoted spans are skipped — the shell does not expand
+    them, so ``echo '$(rm -rf /)'`` is a harmless literal. Falls back to a small
+    self-contained scanner when the import fails so matching never throws and
+    never silently allows.
+    """
+    try:
+        from plugins.tools._bash_policy import (  # type: ignore
+            _extract_nested_shell as _extract,
+        )
+
+        return list(_extract(cmd or ""))
+    except Exception:
+        pass
+    out: list[str] = []
+    s = cmd or ""
+    n = len(s)
+    i = 0
+    sq = False
+    while i < n:
+        c = s[i]
+        if sq:
+            if c == "'":
+                sq = False
+            i += 1
+            continue
+        if c == "'":
+            sq = True
+            i += 1
+            continue
+        if c == "$" and i + 1 < n and s[i + 1] == "(":
+            depth, j = 1, i + 2
+            start = j
+            while j < n and depth:
+                if s[j] == "(":
+                    depth += 1
+                elif s[j] == ")":
+                    depth -= 1
+                j += 1
+            if depth == 0:
+                out.append(s[start : j - 1])
+            i = j
+            continue
+        if c == "`":
+            j = i + 1
+            while j < n and s[j] != "`":
+                j += 1
+            out.append(s[i + 1 : j])
+            i = j + 1
+            continue
+        i += 1
+    return out
+
+
+def _nested_segments_authorized(nested: str, prefixes: set[str]) -> bool:
+    """True when every ``&&``/``|``/``;`` piece of a nested snippet matches.
+
+    Each piece must itself satisfy the same ``seg == p or seg.startswith(p)``
+    prefix rule, transitively (a nested snippet containing further substitution
+    must have that inner payload authorized too). Fail-closed: empty or
+    unmatched pieces return False.
+    """
+    segs = [p.strip() for p in _SEGMENT_SPLIT.split(nested or "") if p.strip()]
+    if not segs:
+        return False
+    for seg in segs:
+        if not any(seg == p or seg.startswith(p + " ") for p in prefixes):
+            return False
+        # Transitive: ``echo $(foo $(bar))`` needs ``bar`` authorized as well.
+        for inner in _nested_shell_snippets(seg):
+            if not _nested_segments_authorized(inner, prefixes):
+                return False
+    return True
 
 
 def _extract_prefix_from_segment(seg: str) -> str:
@@ -124,9 +205,19 @@ class PermissionStore:
                 if _extract_prefix_from_segment(s).split()[0] not in _HELPER_CMDS
             ]
             check_segs = non_helpers if non_helpers else segs
-            return bool(check_segs) and all(
-                any(seg == p or seg.startswith(p + " ") for p in prefixes) for seg in check_segs
-            )
+            if not check_segs:
+                return False
+            for seg in check_segs:
+                if not any(seg == p or seg.startswith(p + " ") for p in prefixes):
+                    return False
+                # Nested-shell guard (issue #39): ``echo $(pip install x)`` is
+                # "just an echo" only on the raw string. Each unquoted nested
+                # payload must independently match a saved prefix, else the
+                # whole command is not authorized.
+                for nested in _nested_shell_snippets(seg):
+                    if not _nested_segments_authorized(nested, prefixes):
+                        return False
+            return True
         return False
 
 
