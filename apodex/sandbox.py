@@ -41,9 +41,11 @@ files configure the boundary with that variable.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 import shlex
+import signal
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -258,8 +260,20 @@ async def run_shell(
         cwd=cwd,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        start_new_session=True,
     )
-    out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+    try:
+        out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+    finally:
+        if proc.returncode is None:
+            # Timed out or cancelled: kill the whole session, not just the
+            # shell, or its children keep running and holding the pipes. Same
+            # contract as ``_CurrentCommands.run`` in plugins.tools._sandbox,
+            # including the bounded wait for a setsid escapee killpg misses.
+            with contextlib.suppress(OSError):
+                os.killpg(proc.pid, signal.SIGKILL)
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(proc.wait(), timeout=5)
     return (
         proc.returncode or 0,
         out.decode("utf-8", "replace"),
