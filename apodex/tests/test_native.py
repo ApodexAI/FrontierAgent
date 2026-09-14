@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import os
+import time
 from pathlib import Path
+
+import pytest
 
 from apodex import cli, docker, sandbox
 from apodex.native import prepare_native_runtime
@@ -197,6 +200,22 @@ def test_bwrap_sandbox_rebuilds_when_workspace_changes(
     assert second.killed is False
     assert second.workspace == str(second_workspace.resolve())
     assert second.binds == ((str(second_workspace.resolve()),) * 2 + (False,),)
+
+
+def test_run_shell_kills_the_whole_command_on_timeout(tmp_path) -> None:
+    """A timed-out command must not keep writing to the workspace.
+
+    The subshell is a grandchild holding the output pipes, so killing only the
+    shell would still leave it alive to write the marker.
+    """
+    with pytest.raises(TimeoutError):
+        asyncio.run(sandbox.run_shell(
+            "(sleep 2; touch marker) & wait", str(tmp_path), 1,
+            Strategy(NATIVE, "test"),
+        ))
+    time.sleep(2)
+
+    assert not (tmp_path / "marker").exists()
 
 
 def test_macos_falls_back_to_native_when_docker_is_unavailable(
