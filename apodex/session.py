@@ -476,7 +476,10 @@ class TerminalSession(TaskRunnerMixin):
         after each completed turn — keep history current and persist."""
         self.history = list(messages)
         self.display_history = list(messages)
-        self._persist()
+        # _persist() does synchronous file I/O over the full history; run it
+        # off the event loop so long sessions don't stall on every turn.
+        # Awaited (not fire-and-forget) so writes stay ordered turn-to-turn.
+        await asyncio.to_thread(self._persist)
 
     # ── persistence (interrupt-safe resume) ───────────────────────────────
     def _enrich_task(self, task: str) -> str:
