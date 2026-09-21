@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -189,6 +190,10 @@ class TerminalSession(TaskRunnerMixin):
         # plugins.tools._path_auth._authorized_local_path). Without this they
         # only allow a few default dirs and deny the user's repo.
         self._authorize_workspace(cwd)
+        # _persist() now runs both on the main thread (start_new_session,
+        # rename_session) and off-thread (_on_turn's asyncio.to_thread), so
+        # concurrent writers must serialize on the same checkpoint file.
+        self._persist_lock = threading.Lock()
 
     @staticmethod
     def _active_spill_workspace() -> Path | None:
@@ -594,7 +599,13 @@ class TerminalSession(TaskRunnerMixin):
 
     def _persist(self) -> None:
         """Checkpoint session state so ``--resume <id>`` can continue it.
-        Best-effort; a failed write never disrupts the session."""
+        Best-effort; a failed write never disrupts the session.
+
+        Serialized via ``_persist_lock`` and written atomically (tmp file +
+        ``os.replace``) because this runs from both the main thread
+        (``start_new_session`` / ``rename_session``) and a worker thread
+        (``_on_turn``'s ``asyncio.to_thread``) — without both, concurrent
+        writers can interleave and corrupt the checkpoint file."""
         try:
             import json
 
@@ -606,37 +617,41 @@ class TerminalSession(TaskRunnerMixin):
                 self.tui_state = raw_tui_state if isinstance(raw_tui_state, dict) else {}
 
             path = _session_state_path(self.session_id)
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump({
-                    "session_id": self.session_id,
-                    "created_at": self.created_at,
-                    "local_timezone": self.local_timezone,
-                    "name": self.session_name,
-                    "mode": self.mode,
-                    "cwd": self.cwd,
-                    "model": self.cfg.model,
-                    # Native messages are plain OpenAI-wire dicts — already
-                    # JSON-serializable, so they round-trip verbatim (no
-                    # langchain messages_to_dict / messages_from_dict needed).
-                    "history": list(self.history),
-                    "display_history": list(self.display_history),
-                    "workflow_turns": list(self.workflow_turns),
-                    "usage": self.usage.to_dict(),
-                    "tui": dict(self.tui_state),
-                    "outputs": {
-                        "agent_root": os.environ.get("FRONTIER_AGENT_OUTPUTS_DIR", ""),
-                        "host_root": os.environ.get("APODEX_HOST_OUTPUTS_DIR", ""),
-                    },
-                    "journal": self.journal.to_dict(),
-                    "journal_observed": self.journal.observed_paths(),
-                    "journal_revert_base": self.journal.revert_bases(),
-                    "plan_active": bool(self.plan_state.active),
-                    "todos": [
-                        {"content": item.content, "status": item.status}
-                        for item in get_todos()
-                    ],
-                }, f, ensure_ascii=False)
+            payload = {
+                "session_id": self.session_id,
+                "created_at": self.created_at,
+                "local_timezone": self.local_timezone,
+                "name": self.session_name,
+                "mode": self.mode,
+                "cwd": self.cwd,
+                "model": self.cfg.model,
+                # Native messages are plain OpenAI-wire dicts — already
+                # JSON-serializable, so they round-trip verbatim (no
+                # langchain messages_to_dict / messages_from_dict needed).
+                "history": list(self.history),
+                "display_history": list(self.display_history),
+                "workflow_turns": list(self.workflow_turns),
+                "usage": self.usage.to_dict(),
+                "tui": dict(self.tui_state),
+                "outputs": {
+                    "agent_root": os.environ.get("FRONTIER_AGENT_OUTPUTS_DIR", ""),
+                    "host_root": os.environ.get("APODEX_HOST_OUTPUTS_DIR", ""),
+                },
+                "journal": self.journal.to_dict(),
+                "journal_observed": self.journal.observed_paths(),
+                "journal_revert_base": self.journal.revert_bases(),
+                "plan_active": bool(self.plan_state.active),
+                "todos": [
+                    {"content": item.content, "status": item.status}
+                    for item in get_todos()
+                ],
+            }
+            with self._persist_lock:
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                tmp_path = f"{path}.{os.getpid()}.{threading.get_ident()}.tmp"
+                with open(tmp_path, "w", encoding="utf-8") as f:
+                    json.dump(payload, f, ensure_ascii=False)
+                os.replace(tmp_path, path)
         except Exception:
             pass
 
