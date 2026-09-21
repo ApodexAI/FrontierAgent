@@ -147,8 +147,12 @@ OPENAI_MODEL=your-model-name
 
 # Optional web research tools
 SERPER_API_KEY=
+SERPER_BASE_URL=https://google.serper.dev
 JINA_API_KEY=
 ```
+
+Support any Serper.dev-compatible endpoint (like litescrape.com, serpbase.dev,
+and others) by setting `SERPER_BASE_URL` and a provider-issued `SERPER_API_KEY`.
 
 Start the TUI:
 
