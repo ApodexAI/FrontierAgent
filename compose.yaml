@@ -1,10 +1,7 @@
 services:
   agent:
-    image: ${FRONTIER_AGENT_IMAGE:-frontieragent:local}
-    # Public users build locally; the organization's GHCR image is private.
-    pull_policy: never
-    build:
-      context: .
+    image: ${FRONTIER_AGENT_IMAGE:-ghcr.io/apodexai/frontieragent:latest}
+    pull_policy: always
     env_file:
       - path: .env
         required: false
@@ -44,10 +41,8 @@ services:
     tty: true
 
   eval:
-    image: ${FRONTIER_AGENT_IMAGE:-frontieragent:local}
-    pull_policy: never
-    build:
-      context: .
+    image: ${FRONTIER_AGENT_IMAGE:-ghcr.io/apodexai/frontieragent:latest}
+    pull_policy: always
     env_file:
       - path: .env
         required: false

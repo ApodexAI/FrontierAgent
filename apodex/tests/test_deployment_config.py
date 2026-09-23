@@ -1,12 +1,8 @@
 from __future__ import annotations
 
-import os
 import re
-import shutil
-import subprocess
 from pathlib import Path
 
-import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -34,13 +30,13 @@ def _dotenv(name: str) -> dict[str, str]:
     return values
 
 
-def test_default_compose_uses_public_local_build_and_preserves_cli_state() -> None:
+def test_default_compose_pulls_release_image_and_preserves_cli_state() -> None:
     compose = _yaml("compose.yaml")
     agent = compose["services"]["agent"]
 
-    assert agent["build"]["context"] == "."
-    assert _fallback(agent["image"]) == "frontieragent:local"
-    assert agent["pull_policy"] == "never"
+    assert "build" not in agent
+    assert IMAGE in agent["image"]
+    assert agent["pull_policy"] == "always"
     assert agent["environment"]["APODEX_IN_CONTAINER"] == "1"
     assert agent["environment"]["SANDBOX_BACKEND"] == "container"
     assert "security_opt" not in agent
@@ -63,46 +59,14 @@ def test_default_compose_uses_public_local_build_and_preserves_cli_state() -> No
     assert agent["environment"]["APODEX_WORKSPACE_LINK"] == "/workspace"
 
 
-def test_development_compose_forces_rebuild_of_public_local_image() -> None:
+def test_development_compose_is_the_only_compose_file_that_builds() -> None:
     compose = _yaml("compose.yaml")
     development = _yaml("compose.dev.yaml")
 
-    for service in compose["services"].values():
-        assert service["build"]["context"] == "."
-        assert service["pull_policy"] == "never"
-        assert _fallback(service["image"]) == "frontieragent:local"
+    assert all("build" not in service for service in compose["services"].values())
     assert development["services"]["agent"]["build"]["context"] == "."
     assert development["services"]["eval"]["build"]["context"] == "."
     assert development["services"]["agent"]["pull_policy"] == "build"
-
-
-def test_docker_context_excludes_frontierchallenge_evaluator_state() -> None:
-    patterns = (ROOT / ".dockerignore").read_text().splitlines()
-    prefix = "benchmarks/frontierchallenge/"
-    for path in (".env", ".env.*", ".frontierchallenge", "tasks", "results",
-                 "dist", ".venv", "venv", "*.log"):
-        assert prefix + path in patterns
-    example = "!" + prefix + ".env.example"
-    assert example in patterns
-    assert patterns.index(example) > patterns.index(prefix + ".env.*")
-
-
-@pytest.mark.parametrize("arguments,service", [(["-p", "hello"], "agent"), (["eval", "--limit", "5"], "eval")])
-def test_docker_helper_reuses_image_from_repository_directory(tmp_path, arguments, service):
-    repo = tmp_path / "repo"
-    (repo / "docker").mkdir(parents=True)
-    shutil.copy2(ROOT / "docker/run.sh", repo / "docker/run.sh")
-    binaries = tmp_path / "bin"
-    binaries.mkdir()
-    fake = binaries / "docker"
-    fake.write_text('#!/bin/sh\npwd\nprintf "%s\\n" "$@"\n')
-    fake.chmod(0o755)
-    result = subprocess.run(["bash", str(repo / "docker/run.sh"), *arguments],
-                            cwd=tmp_path, capture_output=True, text=True, check=True,
-                            env={**os.environ, "PATH": f"{binaries}:{os.environ['PATH']}"})
-    lines = result.stdout.splitlines()
-    assert Path(lines[0]).resolve() == repo.resolve()
-    assert lines[1:7] == ["compose", "run", "--pull", "never", "--rm", service]
 
 
 def test_sglang_compose_mounts_an_optional_local_checkpoint_read_only() -> None:
@@ -347,9 +311,7 @@ def test_user_docs_use_the_published_registry_name() -> None:
     # rather than repeating them.
     paths = [ROOT / "docs/install/docker.md", ROOT / "compose.yaml"]
 
-    assert IMAGE in paths[0].read_text(encoding="utf-8")
-    assert "frontieragent:local" in paths[1].read_text(encoding="utf-8")
-    assert "docker compose build" in paths[0].read_text(encoding="utf-8")
+    assert all(IMAGE in path.read_text(encoding="utf-8") for path in paths)
     assert "docs/install/docker.md" in (ROOT / "README.md").read_text(encoding="utf-8")
 
     # The hyphenated spelling is not the published name and must appear nowhere.

@@ -1,17 +1,16 @@
 # Run FrontierAgent in Docker
 
-The public Docker workflow builds FrontierAgent from this checkout for your
-host architecture (`linux/amd64` or `linux/arm64`). It requires Docker and
-network access to download build dependencies, but no local Python environment.
-The organization's GHCR package is private. The default `compose.yaml` builds
-`frontieragent:local` and reuses it with `pull_policy: never`.
+FrontierAgent publishes pre-built `linux/amd64` and `linux/arm64` images to the
+GitHub Container Registry. Using them requires no local Python environment and
+no system dependencies beyond Docker itself. The default `compose.yaml` pulls
+that published image; it does not build the repository locally.
 
 This page covers the CPU agent container. For a **local NVIDIA model server**,
 the GPU belongs to a separate SGLang container or process — use
 [Docker SGLang on a Linux NVIDIA host](linux-nvidia.md) or
 [Native SGLang without nested Docker](linux-nvidia-native.md) instead.
 
-## Build and run with Compose
+## One-click Compose run
 
 `compose.yaml` marks `.env` as optional, which requires Docker Compose 2.24 or
 newer; older versions reject the file outright.
@@ -20,7 +19,6 @@ newer; older versions reject the file outright.
 git clone https://github.com/ApodexAI/FrontierAgent.git
 cd FrontierAgent
 cp .env.example .env
-docker compose build
 
 # Interactive CLI
 docker compose run --rm agent
@@ -37,37 +35,25 @@ Its named state volume is retained for legacy sessions. Attached inputs are
 copied into a separate volume that tools can only read. See
 [run artifacts and timestamps](../run-artifacts.md) for the on-disk layout.
 
-After building, the convenience helper reuses that local image:
+The convenience helper wraps the same thing:
 
 ```bash
 ./docker/run.sh -p "analyze repository structure"
 ./docker/run.sh eval --limit 5
 ```
 
-The build excludes FrontierChallenge's nested credentials, default evaluator
-staging, task caches, and results. Keep any custom dataset/staging directories
-outside the checkout as well: build contexts must never contain private grader
-material or local secrets. `.env.example` and public runtime source remain in
-the image. The FrontierChallenge task image itself is downloaded from HF via
-its [separate Quickstart](../../benchmarks/frontierchallenge/docs/quickstart.md).
-
 ## Pin a release or another image
 
-Users with access to the private GHCR package can explicitly log in and pull
-an image. Set the same `FRONTIER_AGENT_IMAGE` when running Compose, which then
-uses the downloaded image without pulling or building it. Do not run
-`docker compose build` with this override: that would replace the local tag.
+Set `FRONTIER_AGENT_IMAGE` before running Compose:
 
 ```bash
-docker login ghcr.io
-docker pull ghcr.io/apodexai/frontieragent:latest
 FRONTIER_AGENT_IMAGE=ghcr.io/apodexai/frontieragent:latest \
   docker compose run --rm agent -p "explain pyproject.toml"
 ```
 
 ## Direct `docker run`
 
-First run `docker compose build`. Compose is the supported path; this is the equivalent for environments that
+Compose is the supported path; this is the equivalent for environments that
 cannot use it. The environment variables and mounts are not optional — they are
 what tells the runtime it is inside a container and where the three sandbox
 roots live.
@@ -91,7 +77,7 @@ docker run --rm -it \
   -v frontier-agent-state:/root/.apodex \
   -v frontier-agent-config:/root/.config/apodex \
   -w /workspace \
-  frontieragent:local \
+  ghcr.io/apodexai/frontieragent:latest \
   -p "explain main workflow"
 ```
 
@@ -101,26 +87,26 @@ For a terminal deployment accessed over SSH:
 
 1. Provision an EC2 or ECS Linux instance with Docker and the Compose plugin.
 2. Clone this repository and create `.env` from `.env.example`.
-3. Build and launch the local container:
+3. Pull and launch the pre-built container:
 
 ```bash
 git clone https://github.com/ApodexAI/FrontierAgent.git
 cd FrontierAgent
 cp .env.example .env
 # Edit .env, then:
-docker compose build
+docker compose pull agent
 docker compose run --rm agent
 ```
 
 The container itself is disposable; Compose persists sessions, configuration,
 attachments, and deliverables in volumes or the checked-out workspace. Pull the
-source updates and rebuild with `docker compose build` to upgrade. This is an interactive SSH/TUI deployment, not a
+image again to upgrade. This is an interactive SSH/TUI deployment, not a
 long-running HTTP service.
 
 ## Build from the current checkout
 
-The default build already uses the checkout. For development, the override
-forces a rebuild on each launch:
+To run your own changes instead of the published image, add the development
+override:
 
 ```bash
 cp .env.example .env
