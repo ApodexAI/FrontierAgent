@@ -53,3 +53,8 @@ The top-level Hugging Face `README.md` is intentionally outside
 edited without changing the benchmark payload. Task files, task-level READMEs,
 registries, manifests, image artifacts, and verifier archives remain covered by
 the checksum manifests and registry commitments.
+
+After payload edits, regenerate the affected checksum entries and run both
+bundled verification tools before publishing. Dataset-card-only edits require
+no payload checksum change. Update the runtime's pinned HF revisions after
+publishing; see [Scoring](scoring.md) for the metric contract shared by both cards.

@@ -2,12 +2,17 @@
 
 FrontierChallenge reports two numbers over a fixed denominator of 97 tasks:
 
-- **Pass Rate:** tasks whose verifier writes `passed = 1`, divided by 97.
+- **Pass Rate:** completed evaluations with `task_score == 1.0`, divided by 97.
 - **Score:** the mean of `task_score` across all 97, usually reported times 100.
 
 Unrun tasks and harness failures count as zero in the fixed denominator. The
-summarizer marks an incomplete run as partial instead of averaging only the
-tasks that happened to finish.
+summarizer marks an incomplete run as partial while retaining the denominator
+97. It never drops missing or failed tasks from the headline metrics.
+
+Equality is exact: `0.999` and `0.999999` do not pass. No rounding, epsilon,
+per-task pass threshold, or native `passed` decision enters this calculation.
+`evaluation_complete == 1` is required for a valid score. Invalid scores
+(non-numeric, non-finite, or outside `[0, 1]`) contribute zero and are flagged.
 
 ## Authoritative fields
 
@@ -15,18 +20,37 @@ Each trial writes `verifier/reward.json`:
 
 | Field | Meaning |
 |---|---|
-| `passed` | the task's own pass decision; do not derive it from a global threshold |
+| `passed` | legacy native grader decision; diagnostic only, ignored by official metrics |
 | `task_score` | score from 0 to 1 |
 | `evaluation_complete` | whether verification completed |
 
-The 97 verifiers do not share one pass threshold. For full-mark counts, use
-`task_score >= 0.999`; judge averaging can produce a value just below 1.
+The encrypted native graders and their partial-credit rubrics are unchanged.
+Their historical thresholds vary across tasks. The summarizer now writes
+official full-score decisions to `summary.csv`/`summary.json` as `passed` and
+preserves the raw reward field separately as `native_passed`. A completed
+score of 1 passes even when the native flag is false; a score of 0.8 fails
+even when the native flag is true. Raw `verifier/reward.json` stays unchanged.
 
-Summarize one or more Harbor job directories with:
+This policy is identified by `metric_definition: exact-full-score` in the
+summary. Recompute historical results from raw rewards before comparing them;
+results computed with native thresholds or `>= 0.999` are not interchangeable.
+
+Summarize a Harbor job directory with:
 
 ```bash
 python3 scripts/summarize_results.py results/harbor/<job>
 ```
+
+Use one predeclared attempt per task. Duplicate task trials are rejected rather
+than silently counted twice or selected by their score. For a deliberately
+separate subset report (for example, the 81-task open track), specify
+`--expected-total 81` and report that denominator explicitly; it is not the
+97-task headline metric. `--expected-total` must not be reduced to the number
+of tasks that happened to succeed. Missing tasks still contribute zero.
+
+For repeated trials, use `run_eval.sh --n-attempts N --no-summary` and summarize
+each predeclared attempt separately. Harbor's own aggregation of the raw
+`passed` reward is not the official Pass Rate; use this runtime's summary.
 
 ## Verifiers and judges
 
@@ -66,7 +90,7 @@ solve-side hash and an encrypted-verifier hash. Setup refuses mixed releases.
 Report:
 
 - denominator 97, with missing tasks counted as zero;
-- Pass Rate from `passed`, not from a new threshold;
+- Pass Rate from completed `task_score == 1.0`, ignoring native `passed`;
 - mean `task_score` times 100;
 - agent, model, judge model, and judge repetitions;
 - pinned Docker image identity and ORCA version for full-track runs;

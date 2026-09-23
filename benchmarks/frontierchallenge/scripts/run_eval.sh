@@ -72,7 +72,8 @@ Options:
                                 (default: unset, follows --n-concurrent). A lower cap
                                 here than --n-concurrent adds headroom against
                                 agent-setup timeouts at high concurrency.
-  --n-attempts N               Attempts per task (default: 1)
+  --n-attempts N               Attempts per task (default: 1); use --no-summary
+                                for repeated trials, then report each attempt separately
   --job-name NAME              Harbor job name (default: derived)
   --jobs-dir PATH               Where Harbor writes results (default: results/harbor)
   --stage-dir PATH               Scratch dir for evaluator-owned task copies
@@ -158,6 +159,11 @@ fi
 
 if [[ "$TRACK" != "open" && "$TRACK" != "full" ]]; then
   echo "error: --track must be open or full (got '$TRACK')" >&2
+  exit 1
+fi
+
+if [[ "$N_ATTEMPTS" != "1" && "$NO_SUMMARY" -eq 0 ]]; then
+  echo "error: automatic metrics require one attempt per task; use --no-summary for repeated trials" >&2
   exit 1
 fi
 
@@ -282,7 +288,9 @@ for index in "${!EFFECTIVE_TASK_IDS[@]}"; do
   task_dir="${EFFECTIVE_TASK_SOURCES[$index]}"
   dest="$STAGE_DIR/$task_id"
   EFFECTIVE_TASK_DIRS+=("$dest")
-  source_identity="$SOLVE_DIR|$(grep -m1 '"source_task_sha256"' "$task_dir/task.json" | tr -d ' ,\"')|$OPEN_IMAGE"
+  # Invalidate stages produced by the legacy cp -a runner. Their nested HF
+  # cache-relative symlinks can be broken even when task.toml remains readable.
+  source_identity="dereferenced-v2|$SOLVE_DIR|$(grep -m1 '"source_task_sha256"' "$task_dir/task.json" | tr -d ' ,\"')|$OPEN_IMAGE"
   if [[ "$FORCE_RESTAGE" -eq 0 && -f "$dest/task.toml" \
         && -f "$dest/instruction.md" && ! -e "$dest/statement.fcref" \
         && -f "$dest/.frontier-source" ]] \
@@ -540,17 +548,21 @@ else
     --path "$STAGE_DIR" \
     --env docker \
     --agent "$AGENT" --model "$MODEL" \
-    --n-attempts "$N_ATTEMPTS" --n-concurrent "$N_CONCURRENT" "${CONCURRENT_AGENTS_ARGS[@]}" \
+    --n-attempts "$N_ATTEMPTS" --n-concurrent "$N_CONCURRENT" ${CONCURRENT_AGENTS_ARGS[@]+"${CONCURRENT_AGENTS_ARGS[@]}"} \
     --verifier-timeout-multiplier "$VERIFIER_TIMEOUT_MULTIPLIER" \
     --agent-setup-timeout-multiplier "$AGENT_SETUP_TIMEOUT_MULTIPLIER" \
     --artifact /app/output \
     --jobs-dir "$JOBS_DIR" --job-name "$JOB_NAME" \
     --env-file "$ENV_FILE" \
-    "${AGENT_KWARG_ARGS[@]}" "${INCLUDE_ARGS[@]}" "${VERIFIER_ENV_ARGS[@]}" \
+    ${AGENT_KWARG_ARGS[@]+"${AGENT_KWARG_ARGS[@]}"} "${INCLUDE_ARGS[@]}" ${VERIFIER_ENV_ARGS[@]+"${VERIFIER_ENV_ARGS[@]}"} \
     --yes
 fi
 
 if [[ "$NO_SUMMARY" -eq 0 ]]; then
   echo "== Summarizing $JOBS_DIR/$JOB_NAME =="
-  python3 scripts/summarize_results.py "$JOBS_DIR/$JOB_NAME"
+  SUMMARY_TASK_ARGS=()
+  for task_id in "${EFFECTIVE_TASK_IDS[@]}"; do
+    SUMMARY_TASK_ARGS+=(--task-id "$task_id")
+  done
+  python3 scripts/summarize_results.py "$JOBS_DIR/$JOB_NAME" "${SUMMARY_TASK_ARGS[@]}"
 fi

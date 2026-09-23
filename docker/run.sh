@@ -8,6 +8,9 @@ set -euo pipefail
 #   ./docker/run.sh eval --limit 1         # Run benchmark evaluation
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo_root"
+# Run `docker compose build` once and after source updates. The default local
+# image is reused without requiring access to the organization's private GHCR.
 export APODEX_HOST_UID="$(id -u)"
 export APODEX_HOST_GID="$(id -g)"
 export APODEX_LOCAL_UTC_OFFSET="$(date +%z)"
@@ -18,10 +21,10 @@ if [ "${1:-}" = "eval" ]; then
   shift
   # `docker compose run SERVICE ARGS...` replaces the service command, so
   # include the required benchmark defaults before forwarding overrides.
-  exec docker compose run --rm eval \
+  exec docker compose run --pull never --rm eval \
     --benchmark browsecomp \
     --out /app/results/smoke \
     "$@"
 else
-  exec docker compose run --rm agent "$@"
+  exec docker compose run --pull never --rm agent "$@"
 fi

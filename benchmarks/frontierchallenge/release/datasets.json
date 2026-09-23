@@ -2,10 +2,10 @@
   "schema_version": 1,
   "solve": {
     "repo": "apodex/FrontierChallenge",
-    "revision": "8a73bb02a5709aa007e1a146d0cdc5d36ef5ea4d"
+    "revision": "99288f3848ad9ddd3df0d4e19ec6a8a2e4865ea9"
   },
   "reference": {
     "repo": "apodex/FrontierChallenge-reference",
-    "revision": "59fbf007ad5c6816caf7d379eef32d9fb384edea"
+    "revision": "9e6ee51d24b0d1f5435dd7d450119cab0a7cd49c"
   }
 }

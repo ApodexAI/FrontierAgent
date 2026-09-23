@@ -105,8 +105,12 @@ cat results/harbor/<job>/<trial>/verifier/reward.json
 cat results/harbor/<job>/summary.json
 ```
 
-`passed` is the task's own pass decision; do not derive it from a global score
-threshold. `task_score` is in `[0, 1]`, and `evaluation_complete = 1` confirms
+Official **Pass Rate** counts completed evaluations with **`task_score == 1.0`**
+over all 97 tasks. **Score** is the mean `task_score` over 97, multiplied by 100.
+Missing or failed evaluations contribute zero. The raw reward's `passed` is a
+legacy task-specific decision and is not used for official metrics; summaries
+retain it as `native_passed`. No rounding or `>= 0.999` tolerance is applied.
+`task_score` is in `[0, 1]`, and `evaluation_complete = 1` confirms
 that grading finished. See [Quickstart](docs/quickstart.md) for credentials and
 expected output, and [Scoring](docs/scoring.md) for aggregate reporting.
 

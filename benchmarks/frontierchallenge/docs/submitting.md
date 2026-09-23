@@ -31,8 +31,9 @@ ORCA version; see [Scoring](scoring.md).
 listed if it is labelled as one, with the count of attempted tasks. It cannot
 be listed as a score over a smaller denominator.
 
-**The `passed` field, not a threshold.** See
-[Scoring](scoring.md#the-two-headline-numbers).
+**Full-score Pass Rate.** Count only completed evaluations with
+`task_score == 1.0`; ignore the raw native `passed` field and do not round scores.
+See [Scoring](scoring.md).
 
 **Judge configuration stated.** `gpt-5.6-sol`, `reasoning_effort=high`,
 `JUDGE_REPEATS=3` with `--no-judge-override` is the definitional setting. Any

@@ -49,7 +49,9 @@ missing. See [Docker](providers/docker.md).
 ```
 
 Use disjoint include lists and distinct job names to shard across machines.
-`summarize_results.py` accepts multiple job directories and merges them.
+`summarize_results.py` accepts one job directory at a time; it does not merge
+shards. A shard's report is partial, not a separate full-benchmark result.
+Do not average shard Pass Rates as though they were full runs.
 
 Concurrency must fit both machine resources and model-provider rate limits.
 Start with one task, then increase gradually.
@@ -67,6 +69,10 @@ lowering longer ones:
 Use a separate stage directory for each concurrent run that changes timeouts.
 Verifier timeouts use `--verifier-timeout-multiplier` (default 40).
 
+Legacy staging caches containing Hugging Face symlinks are automatically
+rebuilt once. Only the effective include/exclude selection is staged, checked
+for ORCA, unsealed, and passed to Harbor; leftover stage directories are ignored.
+
 ## Resume and results
 
 Reusing a job name resumes completed work when the requested task set matches:
@@ -81,6 +87,13 @@ Results are written under `results/harbor/<job>/`. Read the aggregate with:
 python3 scripts/summarize_results.py results/harbor/<job>
 cat results/harbor/<job>/summary.json
 ```
+
+Official Pass Rate requires completed `task_score == 1.0`; native `passed` is
+diagnostic only. The default denominator is 97, including missing tasks.
+See [Scoring](scoring.md) for partial scores and explicitly labeled subsets.
+Automatic summaries use the runner's current selection. If a job directory
+contains trials from an older selection, use repeatable `--task-id <id>` with
+the standalone summarizer, or start a fresh job directory.
 
 Before a long run, verify one task reaches `evaluation_complete = 1`, confirm
 the selected backend in the startup banner, and confirm the local ORCA runtime

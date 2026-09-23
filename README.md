@@ -199,11 +199,13 @@ Chinese-speaking macOS users can use the
 
 ## Containers and local models
 
-Pre-built `linux/amd64` and `linux/arm64` images are published to the GitHub
-Container Registry, so no local Python environment is needed:
+Build the Docker image from this checkout; no local Python environment is
+needed. The organization's GHCR image is private, so the public quickstart
+uses a local image and does not require registry credentials:
 
 ```bash
 cp .env.example .env
+docker compose build
 docker compose run --rm agent
 ```
 
