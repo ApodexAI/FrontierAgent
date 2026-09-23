@@ -6,7 +6,8 @@ Hugging Face datasets, a real Harbor + Claude Code run, and the final score.
 ## Requirements
 
 - Linux x86-64 with Docker and Compose v2;
-- Python 3.11+ and about 20 GB for the open image;
+- Python 3.11+; allow at least 40 GB of free disk for the downloaded archive,
+  Docker image, and working data (more for concurrent runs and results);
 - a model API key and a judge API key;
 - `HF_TOKEN` while either dataset is private or gated;
 - for the full track only, an official ORCA 6.0.1 download and permission to
@@ -65,8 +66,9 @@ Setup downloads the solve and reference revisions pinned by this Git checkout in
 `release/datasets.json`, verifies both packages, binds them to this checkout's
 `registry.json`, then
 downloads `images/frontierchallenge-cpu-open-2026.08.docker.tar.zst` from the
-solve dataset. It checks the declared size, SHA-256 and image ID before loading
-the `linux/amd64` image into Docker. No container registry is used. Evaluator-
+solve dataset. It checks the archive's declared size and SHA-256 before loading
+the `linux/amd64` image into Docker, then verifies the loaded image identity.
+No container registry is used. Evaluator-
 local paths are written to `.frontierchallenge/config.env`.
 
 Docker's classic and containerd image stores expose different image IDs. Setup
