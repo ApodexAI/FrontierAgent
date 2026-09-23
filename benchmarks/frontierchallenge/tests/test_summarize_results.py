@@ -30,7 +30,7 @@ def test_official_pass_ignores_native_threshold(tmp_path, score, native, complet
     before = (directory / "verifier/reward.json").read_bytes()
     row = metrics.collect_rows(tmp_path)[0]
     assert row["passed"] == passed
-    assert row["native_passed"] == native
+    assert "native_passed" not in row
     assert (directory / "verifier/reward.json").read_bytes() == before
     assert metrics.summarize([row], 97)["pass_rate"] == passed / 97
 
@@ -87,7 +87,7 @@ def test_missing_submission_still_counts_as_zero(tmp_path):
     assert summary["pass_rate"] == 0
 
 
-def test_cli_outputs_official_and_native_flags_separately(tmp_path):
+def test_cli_outputs_only_one_pass_flag(tmp_path):
     trial(tmp_path, "task_one", 0.9, 1)
     trial(tmp_path, "task_two", 1, 0)
     subprocess.run([sys.executable, str(Path(metrics.__file__)), str(tmp_path),
@@ -98,7 +98,9 @@ def test_cli_outputs_official_and_native_flags_separately(tmp_path):
     assert summary["complete"] is True
     with (tmp_path / "summary.csv").open() as handle:
         rows = list(csv.DictReader(handle))
-    assert [(r["passed"], r["native_passed"]) for r in rows] == [("0.0", "1"), ("1.0", "0")]
+    assert [r["passed"] for r in rows] == ["0.0", "1.0"]
+    assert all("native_passed" not in r for r in rows)
+    assert "native_passed" not in (tmp_path / "summary.json").read_text()
 
 
 def test_cli_excludes_stale_trials_from_reused_job(tmp_path):

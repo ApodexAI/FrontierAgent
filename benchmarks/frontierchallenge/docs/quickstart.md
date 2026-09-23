@@ -158,8 +158,7 @@ cat results/harbor/<job>/<trial>/verifier/reward.json
 
 - `evaluation_complete = 1` means the verifier finished;
 - official Pass Rate counts completed `task_score == 1.0` evaluations over 97;
-- raw `passed` is the native grader's diagnostic decision, ignored by official
-  metrics and retained as `native_passed` in summaries;
+- `passed` uses this same full-score rule in both rewards and summaries;
 - `task_score` is a continuous score in `[0, 1]`.
 
 Score is the mean `task_score` over 97, times 100. Missing and failed evaluations

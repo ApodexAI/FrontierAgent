@@ -2,7 +2,7 @@
 """Aggregate a Harbor job directory into a Pass Rate + Score summary.
 
 Reads each trial's ``config.json`` (to recover which task it ran) and
-``verifier/reward.json`` (``task_score``, ``passed``, ``evaluation_complete``)
+``verifier/reward.json`` (``task_score``, ``evaluation_complete``)
 under a Harbor jobs-dir job, and writes a per-task CSV plus an overall JSON
 summary next to it.
 
@@ -34,7 +34,7 @@ def valid_score(score: Any) -> bool:
 
 
 def official_pass(row: dict[str, Any]) -> bool:
-    """Exact full credit on a completed evaluation; native passed is diagnostic."""
+    """The sole pass decision: exact full credit on a completed evaluation."""
     return (
         row.get("evaluation_complete") == 1
         and valid_score(row.get("task_score"))
@@ -118,7 +118,6 @@ def collect_rows(job_dir: Path) -> list[dict[str, Any]]:
             "model": agent.get("model_name"),
             "task_score": None,
             "passed": None,
-            "native_passed": None,
             "evaluation_complete": None,
             "error": None,
             "scored_zero_missing_artifact": False,
@@ -126,7 +125,6 @@ def collect_rows(job_dir: Path) -> list[dict[str, Any]]:
         reward = load_json(trial_dir / "verifier" / "reward.json")
         if reward is not None:
             row["task_score"] = reward.get("task_score")
-            row["native_passed"] = reward.get("passed")
             row["evaluation_complete"] = reward.get("evaluation_complete")
             if not valid_score(row["task_score"]):
                 row["task_score"] = None
@@ -190,7 +188,6 @@ def write_outputs(job_dir: Path, rows: list[dict[str, Any]], summary: dict[str, 
                 "model",
                 "task_score",
                 "passed",
-                "native_passed",
                 "evaluation_complete",
                 "scored_zero_missing_artifact",
                 "error",

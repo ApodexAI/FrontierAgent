@@ -97,10 +97,11 @@ the task's source/provenance definition, and should be described that way:
 1. runs the LLM judge `JUDGE_REPEATS` times, if the task has one (77 do),
 2. combines them with `statistics.fmean`,
 3. calls the task's own grader with that value as the rubric component,
-4. emits `task_score` and the legacy native `passed` diagnostic.
+4. emits `task_score` and `passed`, which is 1 only for a completed full score.
 
-Official Pass Rate is computed by the summarizer from completed
-`task_score == 1.0` evaluations, independently of native thresholds.
+The runtime applies this single pass rule to the staged reward adapter after
+unsealing. Official Pass Rate is computed by the summarizer from completed
+`task_score == 1.0` evaluations, independently of per-task thresholds.
 
 The full tree is stored in the gated dataset's `verifier.fcref`, including the
 solved reference run, reference fixtures, grader source, judge prompt, and

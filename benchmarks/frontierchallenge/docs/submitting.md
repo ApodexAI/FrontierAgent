@@ -32,7 +32,7 @@ listed if it is labelled as one, with the count of attempted tasks. It cannot
 be listed as a score over a smaller denominator.
 
 **Full-score Pass Rate.** Count only completed evaluations with
-`task_score == 1.0`; ignore the raw native `passed` field and do not round scores.
+`task_score == 1.0`; do not apply per-task thresholds or round scores.
 See [Scoring](scoring.md).
 
 **Judge configuration stated.** `gpt-5.6-sol`, `reasoning_effort=high`,

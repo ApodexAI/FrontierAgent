@@ -40,6 +40,9 @@ def runtime(tmp_path):
         verifier = reference / "tasks" / name
         (verifier / "tests").mkdir(parents=True)
         (verifier / "tests/test.sh").write_text("#!/bin/sh\nexit 0\n")
+        (verifier / "tests/run_frontier_verifier.py").write_text(
+            'reward = {"passed": 1.0 if passed is True else 0.0,}\n'
+        )
         reference_archive.pack(verifier, reference_archive.ARCHIVE_BY_KIND["verifier"],
                                "frontier-challenge-reference", force=True)
         reference_archive.strip(verifier, reference_archive.ARCHIVE_BY_KIND["verifier"])
@@ -86,6 +89,8 @@ def test_open_selection_migrates_legacy_cache_and_ignores_stale_orca(runtime):
     assert (stale / "environment/data/output.txt").read_text() == "precomputed output"
     assert not (stale / "environment/data/output.txt").is_symlink()
     assert (stale / "tests/test.sh").is_file()
+    adapter = (stale / "tests/run_frontier_verifier.py").read_text()
+    assert '"passed": 1.0 if complete and float(score or 0.0) / 100.0 == 1.0 else 0.0' in adapter
     assert "orca-user-local" not in (root / "docker.log").read_text()
     args = (root / "harbor.log").read_text().splitlines()
     assert args[args.index("--include-task-name") + 1] == OPEN

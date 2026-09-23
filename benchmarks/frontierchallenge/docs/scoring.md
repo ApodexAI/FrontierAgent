@@ -20,16 +20,19 @@ Each trial writes `verifier/reward.json`:
 
 | Field | Meaning |
 |---|---|
-| `passed` | legacy native grader decision; diagnostic only, ignored by official metrics |
+| `passed` | 1 only when evaluation completed and `task_score == 1.0`; otherwise 0 |
 | `task_score` | score from 0 to 1 |
 | `evaluation_complete` | whether verification completed |
 
-The encrypted native graders and their partial-credit rubrics are unchanged.
-Their historical thresholds vary across tasks. The summarizer now writes
-official full-score decisions to `summary.csv`/`summary.json` as `passed` and
-preserves the raw reward field separately as `native_passed`. A completed
-score of 1 passes even when the native flag is false; a score of 0.8 fails
-even when the native flag is true. Raw `verifier/reward.json` stays unchanged.
+There is only one pass field, `passed`, with the same meaning in
+`verifier/reward.json`, `summary.csv`, and `summary.json`. A completed score
+of 1 passes; a score of 0.8 does not. No alternate pass field is emitted.
+
+After authenticating and unsealing the reference, the runtime applies the
+full-score rule to the staged reward adapter before Harbor runs it. The
+encrypted reference archives and partial-credit rubrics remain unchanged.
+The summarizer also derives `passed` from score and completion when processing
+older results, discarding their old pass decision rather than copying it.
 
 This policy is identified by `metric_definition: exact-full-score` in the
 summary. Recompute historical results from raw rewards before comparing them;
@@ -49,8 +52,8 @@ separate subset report (for example, the 81-task open track), specify
 of tasks that happened to succeed. Missing tasks still contribute zero.
 
 For repeated trials, use `run_eval.sh --n-attempts N --no-summary` and summarize
-each predeclared attempt separately. Harbor's own aggregation of the raw
-`passed` reward is not the official Pass Rate; use this runtime's summary.
+each predeclared attempt separately. Use this runtime's summary for the
+fixed-denominator headline metric; Harbor may aggregate only attempted trials.
 
 ## Verifiers and judges
 
@@ -90,7 +93,7 @@ solve-side hash and an encrypted-verifier hash. Setup refuses mixed releases.
 Report:
 
 - denominator 97, with missing tasks counted as zero;
-- Pass Rate from completed `task_score == 1.0`, ignoring native `passed`;
+- Pass Rate from completed `task_score == 1.0`;
 - mean `task_score` times 100;
 - agent, model, judge model, and judge repetitions;
 - pinned Docker image identity and ORCA version for full-track runs;
