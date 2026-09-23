@@ -177,6 +177,17 @@ async def test_app_boots_streams_and_routes_task() -> None:
         await _wait_until(lambda: app.busy is False)
 
 
+async def test_preflight_warnings_render_in_the_transcript_after_mount() -> None:
+    """stderr is gone once Textual owns the screen, so the TUI shows them."""
+    app = FrontierAgentApp(
+        _FakeSession(),
+        startup_warnings=["SERPER_API_KEY is not set; web_search will error."],
+    )
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert app.transcript.apply_filter("search", "SERPER_API_KEY") == 1
+
+
 async def test_attachment_commands_update_bar_and_remove_copy(
     monkeypatch, tmp_path,
 ) -> None:

@@ -18,7 +18,7 @@ import logging
 import os
 import shlex
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from os.path import commonprefix
 from pathlib import Path
 from typing import Any, ClassVar
@@ -49,7 +49,12 @@ from apodex.tui.screens import (
 )
 from apodex.tui.sink import TuiApprover, TuiSink
 from apodex.tui.state import TuiPresentationState
-from apodex.tui.themes import THEME_PICKER_NAMES, TUI_THEME_NAMES, register_themes
+from apodex.tui.themes import (
+    GLYPHS,
+    THEME_PICKER_NAMES,
+    TUI_THEME_NAMES,
+    register_themes,
+)
 from apodex.tui.widgets import (
     ActivityPane,
     ActivityRecord,
@@ -440,7 +445,7 @@ class FrontierAgentApp(App):
 
     def __init__(
         self, session: Any, *, resumed: bool = False, initial_task: str | None = None,
-        theme: str = "catppuccin",
+        theme: str = "catppuccin", startup_warnings: Sequence[str] = (),
     ) -> None:
         super().__init__()
         # Before any input is read: Textual's escape-sequence collector gives up
@@ -456,6 +461,9 @@ class FrontierAgentApp(App):
         self._tools = 0
         self._resumed = resumed
         self._initial_task = initial_task
+        # Preflight findings (missing SERPER_API_KEY …). stderr is invisible
+        # once Textual owns the screen, so they are rendered after mount.
+        self._startup_warnings = tuple(startup_warnings)
         register_themes(self)
         self._ui_theme = theme if theme in TUI_THEME_NAMES else "catppuccin"
         self._input_history: list[str] = []
@@ -613,6 +621,8 @@ class FrontierAgentApp(App):
                 f"resumed session {self.session.session_id} "
                 f"({len(self.session.history)} prior messages)"
             )
+        for message in self._startup_warnings:
+            self.sink.note(f"{GLYPHS['danger']} warning: {message}")
         if self._initial_task:
             self._remember_input(self._initial_task)
             self.sink.echo_user(self._initial_task)

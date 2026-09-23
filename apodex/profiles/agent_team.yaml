@@ -14,7 +14,9 @@ llm:
   context_window: ${OPENAI_CONTEXT_WINDOW:-262144}
 # Turn budgets live in the selected workflow profile. ``agent.max_turns`` here
 # would configure apodex's generic loop, which workflow dispatch does not run.
-# The coordinator uses the orchestration tools; its sub-agents receive the
-# web/file tools declared in workflows/agent_team/profiles/tui.yaml.
-tools: [web_search, web_fetch, bash, grep_search, glob_search, read_file, todo_write]
+# No ``tools:`` here on purpose. Workflow dispatch never calls
+# ``profile.tools()``; the coordinator's orchestration tools and its
+# sub-agents' web/file tools are the allowlists in
+# workflows/agent_team/profiles/tui.yaml, and a second copy here could only
+# drift out of step with them.
 skills: []
