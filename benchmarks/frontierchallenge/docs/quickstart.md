@@ -69,6 +69,12 @@ solve dataset. It checks the declared size, SHA-256 and image ID before loading
 the `linux/amd64` image into Docker. No container registry is used. Evaluator-
 local paths are written to `.frontierchallenge/config.env`.
 
+Docker's classic and containerd image stores expose different image IDs. Setup
+accepts the published config digest directly, or verifies that the loaded OCI
+manifest digest links to that exact config inside the SHA-256-verified archive.
+Keep runtime dependencies current with `python -m pip install -e .`; do not
+disable identity checks or change Docker's storage backend to work around this.
+
 For release development only, `--revision main` overrides both pins;
 `--reference-revision` can override the reference revision independently. Normal
 evaluation should keep the checkout's pins so later dataset changes cannot alter

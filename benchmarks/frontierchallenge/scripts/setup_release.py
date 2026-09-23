@@ -7,10 +7,12 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
 import sys
+import tarfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -240,6 +242,58 @@ def validate_orca_runtime(image: str) -> None:
         )
 
 
+def verify_oci_image_identity(stream, image_id: str, config_id: str) -> None:
+    """Bind a containerd manifest ID to the release's frozen config digest.
+
+    The caller has already verified the entire archive's SHA-256. Read only
+    metadata, never extract files or change Docker's storage configuration.
+    """
+    for value in (image_id, config_id):
+        if not isinstance(value, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", value):
+            raise SystemExit("invalid image identity digest")
+    member_name = "blobs/sha256/" + image_id.removeprefix("sha256:")
+    with tarfile.open(fileobj=stream, mode="r|") as archive:
+        for member in archive:
+            if member.name != member_name:
+                continue
+            if not member.isfile() or member.size > 1024 * 1024:
+                raise SystemExit("invalid OCI image manifest entry")
+            raw = archive.extractfile(member).read()
+            if "sha256:" + hashlib.sha256(raw).hexdigest() != image_id:
+                raise SystemExit("OCI image manifest digest mismatch")
+            manifest = json.loads(raw)
+            if not isinstance(manifest, dict):
+                raise SystemExit("invalid OCI image manifest")
+            config = manifest.get("config")
+            if (
+                manifest.get("schemaVersion") != 2
+                or manifest.get("mediaType") not in {
+                    "application/vnd.oci.image.manifest.v1+json",
+                    "application/vnd.docker.distribution.manifest.v2+json",
+                }
+                or not isinstance(config, dict)
+                or config.get("digest") != config_id
+            ):
+                raise SystemExit("loaded HF image configuration does not match its manifest")
+            return
+    raise SystemExit("loaded HF image identity has no matching manifest in the verified archive")
+
+
+def verify_loaded_image_identity(archive: Path, image_id: str, config_id: str) -> None:
+    # Classic Docker exposes the config digest directly. Containerd exposes an
+    # OCI target digest; verify its content-addressed manifest and config link.
+    if image_id == config_id:
+        return
+    try:
+        import zstandard
+    except ImportError as exc:
+        raise SystemExit("install runtime dependencies with `python -m pip install -e .`") from exc
+    with archive.open("rb") as source:
+        with zstandard.ZstdDecompressor().stream_reader(source) as stream:
+            verify_oci_image_identity(stream, image_id, config_id)
+    print("verified OCI manifest → published image config digest")
+
+
 def load_hf_image_archive(
     *,
     solve: Path,
@@ -283,8 +337,7 @@ def load_hf_image_archive(
     if loaded_ref != archive_config["loaded_ref"]:
         raise SystemExit("HF image loaded_ref does not match release/images.json")
     image_id = ensure_image(loaded_ref)
-    if manifest.get("image_id") != image_id:
-        raise SystemExit("loaded HF image identity does not match its manifest")
+    verify_loaded_image_identity(archive, image_id, manifest.get("image_id"))
     return image_id
 
 

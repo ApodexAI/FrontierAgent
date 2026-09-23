@@ -80,6 +80,15 @@ or with a changed task selection. Start a fresh `--job-name` (or `--jobs-dir`).
 Do not manufacture a marker for old results: their raw rewards may use the old
 per-task pass rule. Old results remain untouched and may be summarized separately.
 
+## Loaded image identity differs on Docker's containerd store
+
+Update the runtime and reinstall its dependencies (`python -m pip install -e .`).
+Older setup code compares Docker's OCI manifest ID directly with the release's
+config digest, which can reject a valid image on Docker 29/containerd. Current
+setup verifies the manifest-to-config digest link inside the verified archive.
+Archive size/SHA-256 and platform checks remain mandatory; no daemon restart,
+storage-driver change, registry pull, or HF payload update is needed.
+
 ## Inspect a trial
 
 ```bash
