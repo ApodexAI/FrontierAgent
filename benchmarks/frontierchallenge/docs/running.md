@@ -75,11 +75,20 @@ for ORCA, unsealed, and passed to Harbor; leftover stage directories are ignored
 
 ## Resume and results
 
-Reusing a job name resumes completed work when the requested task set matches:
+Reusing a job name resumes completed work only when the task selection and
+scoring/log policy match the recorded job:
 
 ```bash
 ./scripts/run_eval.sh --agent claude-code --model <model> --job-name <same-name>
 ```
+
+The runner records its policy in
+`<jobs-dir>/.frontierchallenge-policies/<job-name>.json`. Keep that sidecar
+alongside jobs when moving them. A missing/old policy marker, changed task
+selection, or invalid job metadata is refused before staging. Use a fresh
+`--job-name` or `--jobs-dir`; old rewards and logs are not silently rewritten
+or mixed into a new-policy job. Existing results can still be summarized
+separately from their scores, but their original rewards remain historical.
 
 Results are written under `results/harbor/<job>/`. Read the aggregate with:
 

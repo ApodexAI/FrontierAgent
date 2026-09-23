@@ -278,6 +278,14 @@ if [[ ${#EFFECTIVE_TASK_IDS[@]} -eq 0 ]]; then
   exit 1
 fi
 
+POLICY_TASK_ARGS=()
+for task_id in "${EFFECTIVE_TASK_IDS[@]}"; do
+  POLICY_TASK_ARGS+=(--task-id "$task_id")
+done
+# Fail before modifying staging when an old job would mix scoring/log policies.
+JOB_ACTION="$(python3 "$ROOT/scripts/job_policy.py" check \
+  "$JOBS_DIR/$JOB_NAME" "${POLICY_TASK_ARGS[@]}")"
+
 echo "== Staging $TRACK-track tasks from $SOLVE_TASKS into $STAGE_DIR =="
 staged=0
 skipped=0
@@ -454,31 +462,6 @@ if [[ -n "$N_CONCURRENT_AGENTS" ]]; then
   CONCURRENT_AGENTS_ARGS+=(--n-concurrent-agents "$N_CONCURRENT_AGENTS")
 fi
 
-# Resume only when the recorded and requested task sets match. Otherwise keep
-# completed trial directories but archive stale job-level metadata.
-RESUME_JOB=0
-if [[ -f "$JOBS_DIR/$JOB_NAME/config.json" ]]; then
-  if REQUESTED="${EFFECTIVE_TASK_IDS[*]}" python3 - "$JOBS_DIR/$JOB_NAME/lock.json" <<'PY'
-import json, os, sys
-requested = set(os.environ.get("REQUESTED", "").split())
-try:
-    recorded = {t["task"]["name"] for t in json.load(open(sys.argv[1]))["trials"]}
-except Exception:
-    sys.exit(1)          # unreadable lock -> treat as new work
-sys.exit(0 if requested == recorded else 1)
-PY
-  then
-    RESUME_JOB=1
-  else
-    echo "== Task set changed - archiving stale job files in $JOBS_DIR/$JOB_NAME =="
-    stamp=$(date +%Y%m%d-%H%M%S)
-    for f in config.json lock.json result.json job.log; do
-      [[ -e "$JOBS_DIR/$JOB_NAME/$f" ]] && \
-        mv "$JOBS_DIR/$JOB_NAME/$f" "$JOBS_DIR/$JOB_NAME/.prev-$stamp-$f"
-    done
-  fi
-fi
-
 # The real verifier is distributed only through the separate encrypted
 # reference dataset. Download and verify that package first, then point this
 # runner at the resulting directory. The archive password is intentionally
@@ -541,7 +524,9 @@ if [[ -f "$ROOT/scripts/reference_archive.py" ]]; then
   echo "Unsealed $unsealed task(s)."
 fi
 
-if [[ "$RESUME_JOB" -eq 1 ]]; then
+# Record outside Harbor's job directory so a fresh job remains fresh to Harbor.
+python3 "$ROOT/scripts/job_policy.py" record "$JOBS_DIR/$JOB_NAME" "${POLICY_TASK_ARGS[@]}"
+if [[ "$JOB_ACTION" == "resume" ]]; then
   echo "== Resuming existing job dir: $JOBS_DIR/$JOB_NAME =="
   PYTHONPATH="$ROOT" HARBOR_TELEMETRY=off harbor job resume \
     --job-path "$JOBS_DIR/$JOB_NAME"

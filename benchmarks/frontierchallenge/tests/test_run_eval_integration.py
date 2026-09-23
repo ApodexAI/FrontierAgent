@@ -41,7 +41,8 @@ def runtime(tmp_path):
         (verifier / "tests").mkdir(parents=True)
         (verifier / "tests/test.sh").write_text("#!/bin/sh\nexit 0\n")
         (verifier / "tests/run_frontier_verifier.py").write_text(
-            'reward = {"passed": 1.0 if passed is True else 0.0,}\n'
+            'def main():\n    reward = {"passed": 1.0 if passed is True else 0.0,}\n'
+            '\nif __name__ == "__main__":\n    main()\n'
         )
         reference_archive.pack(verifier, reference_archive.ARCHIVE_BY_KIND["verifier"],
                                "frontier-challenge-reference", force=True)
@@ -69,7 +70,8 @@ def runtime(tmp_path):
     stage = tmp_path / "stage"
     cmd = ["bash", str(runtime / "scripts/run_eval.sh"), "--agent", "claude-code",
            "--model", "fixture", "--solve-dir", str(solve), "--reference-dir", str(reference),
-           "--stage-dir", str(stage), "--env-file", str(envfile), "--no-judge-override", "--no-summary"]
+           "--stage-dir", str(stage), "--env-file", str(envfile), "--no-judge-override", "--no-summary",
+           "--jobs-dir", str(tmp_path / "jobs"), "--job-name", "fixture"]
     return tmp_path, solve, stage, cmd, env
 
 
@@ -115,3 +117,29 @@ def test_selected_licensed_task_still_requires_orca(runtime):
     assert result.returncode != 0
     assert "1 task(s) require ORCA" in result.stderr
     assert not (root / "harbor.log").exists()
+
+
+def test_legacy_job_is_refused_before_staging(runtime):
+    root, _, stage, cmd, env = runtime
+    job = root / "jobs/fixture"
+    job.mkdir(parents=True)
+    (job / "config.json").write_text("{}")
+    result = subprocess.run(cmd, env=env, capture_output=True, text=True, check=False)
+    assert result.returncode != 0
+    assert "Use a fresh --job-name" in result.stderr
+    assert not (root / "harbor.log").exists()
+    assert not (stage / OPEN).exists()
+    assert (job / "config.json").read_text() == "{}"
+
+
+def test_current_policy_job_resumes(runtime):
+    import job_policy
+    root, _, _, cmd, env = runtime
+    job = root / "jobs/fixture"
+    job_policy.record_policy(job, [OPEN])
+    job.mkdir(parents=True)
+    (job / "config.json").write_text("{}")
+    (job / "lock.json").write_text(json.dumps({"trials": [{"task": {"name": OPEN}}]}))
+    result = subprocess.run(cmd, env=env, capture_output=True, text=True, check=False)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (root / "harbor.log").read_text().splitlines()[:2] == ["job", "resume"]

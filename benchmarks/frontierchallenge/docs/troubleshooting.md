@@ -73,6 +73,13 @@ Inspect `verifier/reward.json`:
 The aggregate summarizer reports incomplete and missing-artifact counts instead
 of silently treating every zero as the same failure mode.
 
+## An old job is refused after upgrading
+
+The runner refuses populated jobs without a matching scoring/log policy marker
+or with a changed task selection. Start a fresh `--job-name` (or `--jobs-dir`).
+Do not manufacture a marker for old results: their raw rewards may use the old
+per-task pass rule. Old results remain untouched and may be summarized separately.
+
 ## Inspect a trial
 
 ```bash

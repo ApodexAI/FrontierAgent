@@ -37,6 +37,16 @@ encrypted reference archives and partial-credit rubrics remain unchanged.
 The summarizer also derives `passed` from score and completion when processing
 older results, discarding their old pass decision rather than copying it.
 
+Native grader diagnostics are generated in a temporary verifier directory.
+Before publication, pass decisions are removed from diagnostic JSON and text;
+only `reward.json` retains the benchmark's pass field. Partial scores and
+ordinary error diagnostics are preserved. Raw grader logs are not published.
+
+The single-field guarantee applies to new-policy jobs. Legacy jobs are refused
+on resume, rather than mixing their old rewards with new results. Summarizing
+an old job does not rewrite its original rewards or logs; see
+[resume and upgrade rules](running.md#resume-and-results).
+
 This policy is identified by `metric_definition: score-gt-0.999` in the
 summary. Recompute historical results from raw rewards before comparing them;
 results computed with per-task thresholds, `== 1.0`, or `>= 0.999` are not interchangeable.
