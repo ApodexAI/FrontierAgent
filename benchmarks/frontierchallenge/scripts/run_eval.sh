@@ -533,7 +533,7 @@ if [[ -f "$ROOT/scripts/reference_archive.py" ]]; then
       echo "FATAL: $(basename "$task_dir") has no verifier entrypoint after unsealing." >&2
       exit 1
     fi
-    # Emit only the benchmark-wide full-score pass decision, before Harbor
+    # Emit only the benchmark-wide task_score > 0.999 decision, before Harbor
     # reads reward.json. No alternate native pass metric is retained.
     python3 "$ROOT/scripts/apply_score_policy.py" "$task_dir"
     unsealed=$((unsealed + 1))

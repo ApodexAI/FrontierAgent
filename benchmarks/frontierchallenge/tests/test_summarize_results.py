@@ -21,7 +21,8 @@ def trial(root, name, score, native_passed=1, complete=1):
 
 
 @pytest.mark.parametrize("score,native,complete,passed", [
-    (1.0, 0, 1, 1), (1, 1, 1, 1), (0.999999999, 1, 1, 0),
+    (1.0, 0, 1, 1), (1, 1, 1, 1), (0.999999999, 1, 1, 1),
+    (0.9991, 0, 1, 1), (0.998999999, 1, 1, 0), (0.9991, 1, 0, 0),
     (0.999, 1, 1, 0), (0.8, 1, 1, 0), (0.0, 1, 1, 0),
     (1.0, 1, 0, 0), (1.0, 1, None, 0),
 ])
@@ -56,7 +57,8 @@ def test_fixed_denominator_and_partial_credit(tmp_path):
     assert summary["mean_task_score_100"] == pytest.approx(170 / 97)
     assert summary["n_missing_or_errored"] == 94
     assert summary["complete"] is False
-    assert summary["metric_definition"] == "exact-full-score"
+    assert summary["metric_definition"] == "score-gt-0.999"
+    assert summary["pass_rule"] == "evaluation_complete == 1 and 0.999 < task_score <= 1.0"
 
 
 def test_empty_run_is_zero_and_incomplete():

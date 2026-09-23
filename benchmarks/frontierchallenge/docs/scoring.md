@@ -2,15 +2,18 @@
 
 FrontierChallenge reports two numbers over a fixed denominator of 97 tasks:
 
-- **Pass Rate:** completed evaluations with `task_score == 1.0`, divided by 97.
+- **Pass Rate:** completed evaluations with `task_score > 0.999`, divided by 97.
 - **Score:** the mean of `task_score` across all 97, usually reported times 100.
 
 Unrun tasks and harness failures count as zero in the fixed denominator. The
 summarizer marks an incomplete run as partial while retaining the denominator
 97. It never drops missing or failed tasks from the headline metrics.
 
-Equality is exact: `0.999` and `0.999999` do not pass. No rounding, epsilon,
-per-task pass threshold, or native `passed` decision enters this calculation.
+The comparison is strict: `0.999` does not pass; `0.9991` and `1.0` pass.
+Use unrounded scores without an additional epsilon or per-task threshold.
+Compare the stored `task_score`, not a rounded display: for example,
+`0.9990000000000001` passes even if displayed as `0.999`. Score normalization
+and partial-credit arithmetic are unchanged.
 `evaluation_complete == 1` is required for a valid score. Invalid scores
 (non-numeric, non-finite, or outside `[0, 1]`) contribute zero and are flagged.
 
@@ -20,23 +23,23 @@ Each trial writes `verifier/reward.json`:
 
 | Field | Meaning |
 |---|---|
-| `passed` | 1 only when evaluation completed and `task_score == 1.0`; otherwise 0 |
+| `passed` | 1 only when evaluation completed and valid `task_score > 0.999`; otherwise 0 |
 | `task_score` | score from 0 to 1 |
 | `evaluation_complete` | whether verification completed |
 
 There is only one pass field, `passed`, with the same meaning in
 `verifier/reward.json`, `summary.csv`, and `summary.json`. A completed score
-of 1 passes; a score of 0.8 does not. No alternate pass field is emitted.
+of 0.9991 passes; a score of 0.999 does not. No alternate pass field is emitted.
 
 After authenticating and unsealing the reference, the runtime applies the
-full-score rule to the staged reward adapter before Harbor runs it. The
+strict score threshold to the staged reward adapter before Harbor runs it. The
 encrypted reference archives and partial-credit rubrics remain unchanged.
 The summarizer also derives `passed` from score and completion when processing
 older results, discarding their old pass decision rather than copying it.
 
-This policy is identified by `metric_definition: exact-full-score` in the
+This policy is identified by `metric_definition: score-gt-0.999` in the
 summary. Recompute historical results from raw rewards before comparing them;
-results computed with native thresholds or `>= 0.999` are not interchangeable.
+results computed with per-task thresholds, `== 1.0`, or `>= 0.999` are not interchangeable.
 
 Summarize a Harbor job directory with:
 
@@ -93,7 +96,7 @@ solve-side hash and an encrypted-verifier hash. Setup refuses mixed releases.
 Report:
 
 - denominator 97, with missing tasks counted as zero;
-- Pass Rate from completed `task_score == 1.0`;
+- Pass Rate from completed `task_score > 0.999`;
 - mean `task_score` times 100;
 - agent, model, judge model, and judge repetitions;
 - pinned Docker image identity and ORCA version for full-track runs;

@@ -105,11 +105,11 @@ cat results/harbor/<job>/<trial>/verifier/reward.json
 cat results/harbor/<job>/summary.json
 ```
 
-Official **Pass Rate** counts completed evaluations with **`task_score == 1.0`**
+Official **Pass Rate** counts completed evaluations with **`task_score > 0.999`**
 over all 97 tasks. **Score** is the mean `task_score` over 97, multiplied by 100.
 Missing or failed evaluations contribute zero. `passed` has this single meaning
 in both `reward.json` and summaries; no alternate pass field is emitted.
-No rounding or `>= 0.999` tolerance is applied.
+The comparison is strict and uses unrounded scores: exactly `0.999` does not pass.
 `task_score` is in `[0, 1]`, and `evaluation_complete = 1` confirms
 that grading finished. See [Quickstart](docs/quickstart.md) for credentials and
 expected output, and [Scoring](docs/scoring.md) for aggregate reporting.

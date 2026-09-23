@@ -157,12 +157,12 @@ cat results/harbor/<job>/<trial>/verifier/reward.json
 ```
 
 - `evaluation_complete = 1` means the verifier finished;
-- official Pass Rate counts completed `task_score == 1.0` evaluations over 97;
-- `passed` uses this same full-score rule in both rewards and summaries;
+- official Pass Rate counts completed `task_score > 0.999` evaluations over 97;
+- `passed` uses this same strict threshold in both rewards and summaries;
 - `task_score` is a continuous score in `[0, 1]`.
 
 Score is the mean `task_score` over 97, times 100. Missing and failed evaluations
-contribute zero. No `>= 0.999` tolerance or rounding is used for Pass Rate. See
+contribute zero. Use unrounded scores: exactly `0.999` does not pass. See
 [Scoring](scoring.md) for subsets, repeated attempts, and historical results.
 
 The job aggregate is:

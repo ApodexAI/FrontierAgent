@@ -88,7 +88,7 @@ python3 scripts/summarize_results.py results/harbor/<job>
 cat results/harbor/<job>/summary.json
 ```
 
-Official Pass Rate requires completed `task_score == 1.0`; `passed` means the
+Official Pass Rate requires completed `task_score > 0.999`; `passed` means the
 same thing in rewards and summaries. The default denominator is 97, including missing tasks.
 See [Scoring](scoring.md) for partial scores and explicitly labeled subsets.
 Automatic summaries use the runner's current selection. If a job directory

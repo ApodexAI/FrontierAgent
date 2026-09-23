@@ -10,17 +10,17 @@ import argparse
 from pathlib import Path
 
 OLD_RULE = '"passed": 1.0 if passed is True else 0.0,'
-FULL_SCORE_RULE = (
-    '"passed": 1.0 if complete and float(score or 0.0) / 100.0 == 1.0 else 0.0,'
+PASS_RULE = (
+    '"passed": 1.0 if complete and 0.999 < float(score or 0.0) / 100.0 <= 1.0 else 0.0,'
 )
 
 
 def apply_policy(task_dir: Path) -> None:
     adapter = task_dir / "tests" / "run_frontier_verifier.py"
     text = adapter.read_text(encoding="utf-8")
-    if text.count(OLD_RULE) != 1 or FULL_SCORE_RULE in text:
+    if text.count(OLD_RULE) != 1 or PASS_RULE in text:
         raise ValueError(f"unsupported or already modified reward adapter: {adapter}")
-    adapter.write_text(text.replace(OLD_RULE, FULL_SCORE_RULE), encoding="utf-8")
+    adapter.write_text(text.replace(OLD_RULE, PASS_RULE), encoding="utf-8")
 
 
 def main() -> None:

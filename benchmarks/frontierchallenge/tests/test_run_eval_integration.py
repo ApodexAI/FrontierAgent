@@ -90,7 +90,7 @@ def test_open_selection_migrates_legacy_cache_and_ignores_stale_orca(runtime):
     assert not (stale / "environment/data/output.txt").is_symlink()
     assert (stale / "tests/test.sh").is_file()
     adapter = (stale / "tests/run_frontier_verifier.py").read_text()
-    assert '"passed": 1.0 if complete and float(score or 0.0) / 100.0 == 1.0 else 0.0' in adapter
+    assert '"passed": 1.0 if complete and 0.999 < float(score or 0.0) / 100.0 <= 1.0 else 0.0' in adapter
     assert "orca-user-local" not in (root / "docker.log").read_text()
     args = (root / "harbor.log").read_text().splitlines()
     assert args[args.index("--include-task-name") + 1] == OPEN

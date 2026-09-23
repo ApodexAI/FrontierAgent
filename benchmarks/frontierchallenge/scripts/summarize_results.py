@@ -21,7 +21,7 @@ from typing import Any
 #: 100 tasks minus task_065 (needs a GPU) and task_047 / task_049 (their
 #: deterministic grader only runs in a nested container, unavailable here).
 EXPECTED_TOTAL_TASKS = 97
-METRIC_DEFINITION = "exact-full-score"
+METRIC_DEFINITION = "score-gt-0.999"
 
 
 def valid_score(score: Any) -> bool:
@@ -34,11 +34,11 @@ def valid_score(score: Any) -> bool:
 
 
 def official_pass(row: dict[str, Any]) -> bool:
-    """The sole pass decision: exact full credit on a completed evaluation."""
+    """The sole pass decision: a completed valid score strictly above 0.999."""
     return (
         row.get("evaluation_complete") == 1
         and valid_score(row.get("task_score"))
-        and row["task_score"] == 1.0
+        and row["task_score"] > 0.999
     )
 
 #: Judge stderr wording (both casings occur across the frozen graders) for the
@@ -161,7 +161,7 @@ def summarize(rows: list[dict[str, Any]], expected_total: int) -> dict[str, Any]
     pass_rate = n_passed / expected_total
     return {
         "metric_definition": METRIC_DEFINITION,
-        "pass_rule": "evaluation_complete == 1 and task_score == 1.0",
+        "pass_rule": "evaluation_complete == 1 and 0.999 < task_score <= 1.0",
         "n_tasks_expected": expected_total,
         "n_trials_found": n,
         "n_graded": len(graded),
@@ -222,7 +222,7 @@ def print_report(job_dir: Path, summary: dict[str, Any]) -> None:
         )
     if summary["pass_rate"] is not None:
         print(
-            f"Pass Rate (task_score == 1): {summary['n_passed']}/{summary['n_tasks_expected']} "
+            f"Pass Rate (task_score > 0.999): {summary['n_passed']}/{summary['n_tasks_expected']} "
             f"= {summary['pass_rate'] * 100:.1f}%"
         )
     else:
