@@ -5,6 +5,19 @@
 benchmarks/public/datasets
 benchmarks/public/results
 benchmarks/public/tasks-generated
+# FrontierChallenge's evaluator state is never part of a runtime image.
+# Root-only .env/results patterns do not cover this nested benchmark.
+benchmarks/frontierchallenge/.env
+benchmarks/frontierchallenge/.env.*
+!benchmarks/frontierchallenge/.env.example
+benchmarks/frontierchallenge/.frontierchallenge
+benchmarks/frontierchallenge/tasks
+benchmarks/frontierchallenge/results
+benchmarks/frontierchallenge/dist
+benchmarks/frontierchallenge/.venv
+benchmarks/frontierchallenge/venv
+benchmarks/frontierchallenge/.pytest_cache
+benchmarks/frontierchallenge/*.log
 # Legacy pre-rename paths may still contain local corpora, generated ground
 # truth, and run artifacts in existing checkouts. Keep them out of remote build
 # contexts and images even though the current runtime no longer reads them.

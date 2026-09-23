@@ -76,6 +76,17 @@ def test_development_compose_forces_rebuild_of_public_local_image() -> None:
     assert development["services"]["agent"]["pull_policy"] == "build"
 
 
+def test_docker_context_excludes_frontierchallenge_evaluator_state() -> None:
+    patterns = (ROOT / ".dockerignore").read_text().splitlines()
+    prefix = "benchmarks/frontierchallenge/"
+    for path in (".env", ".env.*", ".frontierchallenge", "tasks", "results",
+                 "dist", ".venv", "venv", "*.log"):
+        assert prefix + path in patterns
+    example = "!" + prefix + ".env.example"
+    assert example in patterns
+    assert patterns.index(example) > patterns.index(prefix + ".env.*")
+
+
 @pytest.mark.parametrize("arguments,service", [(["-p", "hello"], "agent"), (["eval", "--limit", "5"], "eval")])
 def test_docker_helper_reuses_image_from_repository_directory(tmp_path, arguments, service):
     repo = tmp_path / "repo"

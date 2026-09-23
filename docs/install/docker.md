@@ -44,6 +44,13 @@ After building, the convenience helper reuses that local image:
 ./docker/run.sh eval --limit 5
 ```
 
+The build excludes FrontierChallenge's nested credentials, default evaluator
+staging, task caches, and results. Keep any custom dataset/staging directories
+outside the checkout as well: build contexts must never contain private grader
+material or local secrets. `.env.example` and public runtime source remain in
+the image. The FrontierChallenge task image itself is downloaded from HF via
+its [separate Quickstart](../../benchmarks/frontierchallenge/docs/quickstart.md).
+
 ## Pin a release or another image
 
 Users with access to the private GHCR package can explicitly log in and pull
