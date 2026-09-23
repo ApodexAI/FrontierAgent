@@ -6,7 +6,8 @@ Hugging Face datasets, a real Harbor + Claude Code run, and the final score.
 ## Requirements
 
 - Linux x86-64 with Docker and Compose v2;
-- Python 3.11+; allow at least 40 GB of free disk for the downloaded archive,
+- Python 3.12+ on the evaluator host (required by Harbor 0.20.0);
+  allow at least 40 GB of free disk for the downloaded archive,
   Docker image, and working data (more for concurrent runs and results);
 - a model API key and a judge API key;
 - `HF_TOKEN` while either dataset is private or gated;
@@ -25,6 +26,8 @@ docker compose version
 ```bash
 git clone https://github.com/ApodexAI/FrontierAgent.git
 cd FrontierAgent/benchmarks/frontierchallenge
+python3.12 -m venv .venv
+source .venv/bin/activate
 python -m pip install -e .
 cp .env.example .env
 ```

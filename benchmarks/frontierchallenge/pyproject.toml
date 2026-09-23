@@ -12,7 +12,9 @@ name = "frontier-challenge"
 version = "0"
 description = "FrontierChallenge: evaluating AI systems on real scientific workflows"
 readme = "README.md"
-requires-python = ">=3.11"
+# Harbor 0.20.0 requires Python 3.12 on the evaluator host. Scientific task
+# containers have their own, separately frozen interpreter versions.
+requires-python = ">=3.12"
 authors = [{ name = "Apodex AI" }, { name = "GADE Union" }]
 keywords = ["benchmark", "agents", "evaluation", "scientific-computing"]
 license = "CC-BY-4.0"

@@ -1,6 +1,19 @@
+import tomllib
 from pathlib import Path
 
 SCRIPT = Path(__file__).parents[1] / "scripts" / "run_eval.sh"
+
+
+def test_runtime_python_floor_matches_pinned_harbor_and_docs():
+    root = SCRIPT.parents[1]
+    project = tomllib.loads((root / "pyproject.toml").read_text())["project"]
+    assert "harbor==0.20.0" in project["dependencies"]
+    assert project["requires-python"] == ">=3.12"
+    for relative in ("README.md", "docs/quickstart.md"):
+        text = (root / relative).read_text()
+        assert "Python 3.12+" in text
+        assert "Python 3.11+" not in text
+        assert "python3.12 -m venv .venv" in text
 
 
 def test_orca_preflight_uses_declared_environment_not_instruction_text():

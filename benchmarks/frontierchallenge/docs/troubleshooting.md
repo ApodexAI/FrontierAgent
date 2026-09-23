@@ -1,5 +1,13 @@
 # Troubleshooting
 
+## Editable install cannot resolve Harbor
+
+The pinned Harbor 0.20.0 requires Python 3.12 or newer on the evaluator host.
+Use a Python 3.12+ virtual environment as shown in [Quickstart](quickstart.md),
+then rerun `python -m pip install -e .`. Do not downgrade Harbor to work around
+an older system Python. The Python versions inside the frozen scientific task
+images are separate and do not need to change.
+
 ## Setup cannot find the datasets
 
 While either HF repository is private or gated, pass an authorized token only
@@ -11,7 +19,7 @@ HF_TOKEN=hf_... ./scripts/setup.sh --track open
 
 Do not place the HF token in `.env`, which is used to configure model and judge
 credentials. For offline use, pass local solve and reference directories as
-shown in [Quickstart](quickstart.md).
+shown in [Hugging Face layout](huggingface-release.md#download-and-verify).
 
 ## Docker is installed but runs do not start
 

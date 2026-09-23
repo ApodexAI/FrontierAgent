@@ -38,13 +38,15 @@ simulation, electrochemistry, quantitative imaging, and molecular biology.
 
 ## End-to-end workflow
 
-Requirements: Linux x86-64, Python 3.11+, Docker with Compose, model
+Requirements: Linux x86-64, Python 3.12+ (Harbor 0.20.0), Docker with Compose, model
 and judge credentials, and a Hugging Face token while either dataset is private
 or gated.
 
 ```bash
 git clone https://github.com/ApodexAI/FrontierAgent.git
 cd FrontierAgent/benchmarks/frontierchallenge
+python3.12 -m venv .venv
+source .venv/bin/activate
 python -m pip install -e .
 cp .env.example .env
 ```
