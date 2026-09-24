@@ -36,5 +36,8 @@ Initial open-source release of FrontierAgent.
 
 ### Fixed
 
+- Surface finalize-gate bypasses on the final turn: an answer delivered despite
+  open task-board items now carries an unfinished-work note and a
+  `finalize_gate_bypassed` marker instead of reading as a clean success.
 - Apply benchmark question limits after seeded shuffling so repeated runs can
   sample different questions while `--no-shuffle` keeps canonical ordering.

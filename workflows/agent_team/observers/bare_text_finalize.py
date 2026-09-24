@@ -7,8 +7,30 @@ from frontier_agent.core.execution_context import get_current_execution_scope
 from frontier_agent.core.loop_types import BaseObserver, Intervention, TurnContext
 from plugins.tools._bus_scope import resolve_bus_task_id
 from plugins.tools.finalize_answer import finalize_gate
+from plugins.tools.task_board import unresolved_task_ids
 
 logger = logging.getLogger(__name__)
+
+
+def _unfinished_note(task_id: str, text: str) -> str:
+    """Footnote an answer that is being delivered despite a blocked gate.
+
+    The last turn must not lose the answer to ``max_turns`` (see the bypass
+    below), but an unfinished run must never read as a clean success: name the
+    board items that are still unresolved so the reader can tell which parts
+    of the answer were never corroborated.
+    """
+    pending = unresolved_task_ids(task_id)
+    if pending:
+        what = f"task-board item(s) still unfinished: {', '.join(pending)}"
+    else:
+        what = "the finalize gate was still rejecting this submission"
+    return (
+        f"{text}\n\n---\n\n"
+        f"> ⚠ Unfinished work at submission: {what}. This answer was "
+        "delivered on the final turn despite the gate — conclusions that "
+        "depend on that work are unverified."
+    )
 
 
 class BareTextFinalizeObserver(BaseObserver):
@@ -36,6 +58,14 @@ class BareTextFinalizeObserver(BaseObserver):
             return Intervention(continue_to_next_turn=True, inject_messages=[err])
 
         if isinstance(ctx.metadata, dict):
+            if err:
+                # Last-turn bypass: the gate says BLOCK, but the answer is
+                # delivered anyway rather than lost to max_turns. Keep that
+                # fallback — and make it visible (machine-readable marker
+                # plus a user-visible note), so an unfinished run is never
+                # presented as a clean success.
+                ctx.metadata["finalize_gate_bypassed"] = err
+                text = _unfinished_note(ctx.task_id, text)
             ctx.metadata["final_answer"] = text
             ctx.metadata["final_answer_confidence"] = 1.0
         logger.info(
