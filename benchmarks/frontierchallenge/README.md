@@ -29,7 +29,7 @@ simulation, electrochemistry, quantitative imaging, and molecular biology.
   <tbody>
     <tr><td>Tasks</td><td>97 (74 hard, 23 medium)</td></tr>
     <tr><td>Taxonomy</td><td>6 domains, 21 subdomains</td></tr>
-    <tr><td>Runtime</td><td>81 open-image tasks, 16 user-supplied ORCA tasks</td></tr>
+    <tr><td>Runtime</td><td>81 open-image tasks, 16 tasks executing user-supplied ORCA</td></tr>
     <tr><td>Grading</td><td>deterministic checks; 77 tasks also judge the report</td></tr>
     <tr><td>Harness</td><td>Harbor 0.20.0</td></tr>
     <tr><td>Output</td><td>named files under <code>/app/output</code></td></tr>
@@ -38,13 +38,15 @@ simulation, electrochemistry, quantitative imaging, and molecular biology.
 
 ## End-to-end workflow
 
-Requirements: Linux x86-64, Python 3.11+, Docker with Compose, model
+Requirements: Linux x86-64, Python 3.12+ (Harbor 0.20.0), Docker with Compose, model
 and judge credentials, and a Hugging Face token while either dataset is private
 or gated.
 
 ```bash
 git clone https://github.com/ApodexAI/FrontierAgent.git
 cd FrontierAgent/benchmarks/frontierchallenge
+python3.12 -m venv .venv
+source .venv/bin/activate
 python -m pip install -e .
 cp .env.example .env
 ```
@@ -59,10 +61,10 @@ its SHA-256, and load it into Docker:
 HF_TOKEN=hf_... ./scripts/setup.sh --track open
 ```
 
-The full track adds 16 normally released ORCA tasks. FrontierChallenge does
-not distribute ORCA or an image containing it. After obtaining ORCA 6.0.1 from
-its official provider, build and smoke-test the private local runtime, then
-validate the full track:
+The full track adds 16 normally released tasks that execute ORCA.
+FrontierChallenge does not distribute ORCA or an image containing it. After
+obtaining ORCA 6.0.1 from its official provider, build and smoke-test the
+private local runtime, then validate the full track:
 
 ```bash
 ./scripts/build_orca_runtime.sh \
@@ -73,6 +75,10 @@ HF_TOKEN=hf_... ./scripts/setup.sh --track full
 
 Do not push, export, publish, or share the resulting ORCA image. See the
 [ORCA setup tutorial](docs/providers/orca.md).
+
+Track membership describes what a task executes, not where its input files
+came from. For example, `task_098_orca_claisen_thermochemistry` reads supplied
+ORCA output but does not run ORCA, so it belongs to the open track.
 
 ### 2. Run a real task
 
@@ -101,8 +107,12 @@ cat results/harbor/<job>/<trial>/verifier/reward.json
 cat results/harbor/<job>/summary.json
 ```
 
-`passed` is the task's own pass decision; do not derive it from a global score
-threshold. `task_score` is in `[0, 1]`, and `evaluation_complete = 1` confirms
+Official **Pass Rate** counts completed evaluations with **`task_score > 0.999`**
+over all 97 tasks. **Score** is the mean `task_score` over 97, multiplied by 100.
+Missing or failed evaluations contribute zero. `passed` has this single meaning
+in both `reward.json` and summaries; no alternate pass field is emitted.
+The comparison is strict and uses unrounded scores: exactly `0.999` does not pass.
+`task_score` is in `[0, 1]`, and `evaluation_complete = 1` confirms
 that grading finished. See [Quickstart](docs/quickstart.md) for credentials and
 expected output, and [Scoring](docs/scoring.md) for aggregate reporting.
 
