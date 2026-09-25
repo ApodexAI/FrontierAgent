@@ -276,8 +276,19 @@ def test_gitignore_path_anchored_not_overpruned(tmp_path):
 
 
 # ── path localization (abs→rel avoids the ~50s sandbox slow path) ─────────
-def test_localize_absolute_path_inside_cwd(tmp_path):
+@pytest.mark.parametrize("workspace_mode", ["unset", "same", "symlink"])
+def test_localize_absolute_path_inside_cwd(tmp_path, monkeypatch, workspace_mode):
     cwd = str(tmp_path)
+    # Localization is valid only when the runtime resolves paths in cwd.
+    # Do not inherit a workspace configured by another test or the caller.
+    monkeypatch.delenv("FRONTIER_AGENT_INPUTS_DIR", raising=False)
+    monkeypatch.delenv("FRONTIER_AGENT_WORKSPACE_DIR", raising=False)
+    if workspace_mode == "same":
+        monkeypatch.setenv("FRONTIER_AGENT_WORKSPACE_DIR", cwd)
+    elif workspace_mode == "symlink":
+        workspace = tmp_path / "workspace-link"
+        workspace.symlink_to(tmp_path, target_is_directory=True)
+        monkeypatch.setenv("FRONTIER_AGENT_WORKSPACE_DIR", str(workspace))
     (tmp_path / "sub").mkdir()
     abspath = str(tmp_path / "sub" / "f.py")
     out = localize_path_args("read_file", {"path": abspath}, cwd)
@@ -294,6 +305,7 @@ def test_read_file_keeps_project_absolute_path_with_split_runtime_workspace(
     target = project / "README.md"
     target.write_text("# project\n")
 
+    monkeypatch.delenv("FRONTIER_AGENT_INPUTS_DIR", raising=False)
     monkeypatch.setenv(
         "FRONTIER_AGENT_WORKSPACE_DIR", str(runtime_workspace),
     )
