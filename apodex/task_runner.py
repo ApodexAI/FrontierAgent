@@ -564,6 +564,7 @@ class TaskRunnerMixin:
             stopped_by,
             answer_status=str(state.get("answer_status") or ""),
             answer_source=str(state.get("final_answer_source") or ""),
+            no_tool_is_complete=True,
         )
         if complete:
             self.r.final(
