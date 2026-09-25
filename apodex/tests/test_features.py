@@ -284,6 +284,27 @@ def test_localize_absolute_path_inside_cwd(tmp_path):
     assert out is not None and out["path"] == "sub/f.py"
 
 
+def test_read_file_keeps_project_absolute_path_with_split_runtime_workspace(
+    tmp_path, monkeypatch,
+):
+    project = tmp_path / "project"
+    runtime_workspace = tmp_path / "private-workspace"
+    project.mkdir()
+    runtime_workspace.mkdir()
+    target = project / "README.md"
+    target.write_text("# project\n")
+
+    monkeypatch.setenv(
+        "FRONTIER_AGENT_WORKSPACE_DIR", str(runtime_workspace),
+    )
+
+    out = localize_path_args(
+        "read_file", {"path": str(target)}, str(project),
+    )
+
+    assert out is None
+
+
 def test_localize_preserves_absolute_task_input_path(tmp_path, monkeypatch):
     inputs = tmp_path / ".apodex" / "inputs" / "run"
     inputs.mkdir(parents=True)
@@ -931,6 +952,8 @@ def test_native_workflow_no_tool_stop_is_not_reported_as_delivery(
     assert "no_tool" in out
     assert "partial output was not saved as a final report" in out
     assert "Final report" not in out
+    assert "turns=12" in out
+    assert "tools=0" in out
 
 
 def test_generic_loop_no_tool_stop_is_a_normal_finish():
@@ -940,6 +963,33 @@ def test_generic_loop_no_tool_stop_is_a_normal_finish():
     assert _is_complete_run("no_tool", no_tool_is_complete=True) is True
     assert _is_complete_run("no_tool") is False
     assert _is_complete_run("max_turns", no_tool_is_complete=True) is False
+
+
+def test_workflow_complete_agent_no_tool_is_a_normal_finish():
+    """A workflow-certified agent answer may terminate via a tool-free turn."""
+    from apodex.task_runner import _is_complete_run
+
+    assert _is_complete_run(
+        "no_tool",
+        answer_status="complete",
+        answer_source="agent",
+    ) is True
+
+    # Do not broaden workflow no_tool into an unconditional success signal.
+    assert _is_complete_run(
+        "no_tool",
+        answer_status="best_effort",
+        answer_source="agent",
+    ) is False
+    assert _is_complete_run(
+        "no_tool",
+        answer_source="agent",
+    ) is False
+    assert _is_complete_run(
+        "max_turns",
+        answer_status="complete",
+        answer_source="agent",
+    ) is False
 
 
 async def _drive_workflow(session, profile, follow_up):
@@ -1528,3 +1578,20 @@ def test_download_file_target_is_the_resolved_destination(monkeypatch, tmp_path)
     assert named.startswith(str(tmp_path / "downloads" / "p.pdf"))
     assert "/elsewhere/" not in named           # the requested directory is ignored
     assert "renamed" in named                   # collisions rename it
+
+
+def test_native_workflow_uses_authoritative_loop_telemetry(
+    tmp_path, monkeypatch, capsys,
+):
+    _run_workflow_returning({
+        "final_answer": "done",
+        "answer_status": "complete",
+        "final_answer_source": "agent",
+        "stopped_by": "no_tool",
+        "react_steps": [{}] * 7,
+        "turns_used": 8,
+        "tool_calls_count": 7,
+    }, tmp_path, monkeypatch)
+
+    out = capsys.readouterr().out
+    assert "turns=8 · tools=7 · no_tool" in out
