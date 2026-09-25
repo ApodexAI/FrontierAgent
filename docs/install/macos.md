@@ -81,6 +81,12 @@ the project root.
 not present locally is pulled, never built under that name. For Compose and
 `docker run` deployments, see [Run FrontierAgent in Docker](docker.md).
 
+A `frontier-agent` installed with `uv tool install` has no repository to build
+from. Build `apodex:local` once from a clone, or set
+`APODEX_BUILD_CONTEXT=/path/to/FrontierAgent`, before relying on the container
+path; otherwise the launch stops and lists those options together with
+`--native`. Details in [Install once and launch from any project](global-install.md).
+
 `--bwrap` is therefore not available on macOS; it reports that and names these
 two paths instead.
 

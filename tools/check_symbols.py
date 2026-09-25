@@ -16,6 +16,10 @@ shows up as two errors that only clear simultaneously.
 Understands PEP 562 lazy re-exports: a module with a module-level
 ``__getattr__`` has its ``__all__`` treated as the contract.
 
+Also follows the AgentCore compatibility shims: a module that replaces itself
+via ``sys.modules[__name__] = <imported module>`` exposes that module's names,
+and ``from <external> import *`` contributes the external module's names.
+
 Only sees `from X import name`. Attribute access (`mod.name`) is invisible, so
 this narrows the risk rather than eliminating it — `tools/import_smoke.py`
 covers what actually resolves at import time.
@@ -23,6 +27,7 @@ covers what actually resolves at import time.
 from __future__ import annotations
 
 import ast
+import importlib.util
 import sys
 from pathlib import Path
 
@@ -35,6 +40,37 @@ def module_file(dotted: str) -> Path | None:
     for cand in (AH / f"{sub}.py", AH / sub / "__init__.py"):
         if cand.exists():
             return cand
+    return None
+
+
+def external_module_file(dotted: str) -> Path | None:
+    """Source file of an installed (non-repo) module such as ``agent_core``."""
+    try:
+        spec = importlib.util.find_spec(dotted)
+    except (ImportError, ValueError):
+        return None
+    if spec is None or not spec.origin or not spec.origin.endswith(".py"):
+        return None
+    return Path(spec.origin)
+
+
+def _sys_modules_alias(tree: ast.Module) -> str | None:
+    """The module a ``sys.modules[__name__] = <alias>`` shim stands in for."""
+    imported: dict[str, str] = {}
+    for n in tree.body:
+        if isinstance(n, ast.Import):
+            for a in n.names:
+                if a.asname:
+                    imported[a.asname] = a.name
+    for n in tree.body:
+        if (
+            isinstance(n, ast.Assign)
+            and len(n.targets) == 1
+            and isinstance(n.targets[0], ast.Subscript)
+            and ast.unparse(n.targets[0]) == "sys.modules[__name__]"
+            and isinstance(n.value, ast.Name)
+        ):
+            return imported.get(n.value.id)
     return None
 
 
@@ -56,8 +92,23 @@ def top_level_names(path: Path) -> set[str]:
         tree = ast.parse(path.read_text(encoding="utf-8"))
     except SyntaxError:
         return _cache.setdefault(path, set())
+    alias = _sys_modules_alias(tree)
+    if alias is not None:
+        target = module_file(alias) or external_module_file(alias)
+        _cache[path] = set()  # guard against alias cycles
+        _cache[path] = top_level_names(target) if target else set()
+        return _cache[path]
     names: set[str] = set()
     for n in tree.body:
+        if (
+            isinstance(n, ast.ImportFrom)
+            and n.module
+            and n.level == 0
+            and any(a.name == "*" for a in n.names)
+        ):
+            star = module_file(n.module) or external_module_file(n.module)
+            if star is not None and star != path:
+                names |= {x for x in top_level_names(star) if not x.startswith("_")}
         if isinstance(n, ast.FunctionDef) and n.name == "__getattr__":
             for m in tree.body:
                 if isinstance(m, ast.Assign) and any(

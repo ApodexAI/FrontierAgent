@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-
 import setup_release
 
 
@@ -91,14 +90,42 @@ def test_write_config_quotes_evaluator_paths(tmp_path):
         reference=tmp_path / "reference package",
         track="open",
         open_image="example/image@sha256:123",
-        revision="main",
+        solve_revision="solve-sha",
+        reference_revision="reference-sha",
     )
 
     text = config.read_text()
     assert "FRONTIER_SOLVE_DIR=" in text
     assert "'" in text
     assert "example/image@sha256:123" in text
+    assert "FRONTIER_SOLVE_REVISION=solve-sha" in text
+    assert "FRONTIER_REFERENCE_REVISION=reference-sha" in text
     assert "FRONTIER_IMAGE_SOURCE" not in text
+
+
+def test_select_revisions_uses_independent_pins_by_default():
+    release = {
+        "solve": {"revision": "solve-sha"},
+        "reference": {"revision": "reference-sha"},
+    }
+
+    assert setup_release.select_revisions(release, None, None) == (
+        "solve-sha",
+        "reference-sha",
+    )
+
+
+def test_revision_override_preserves_legacy_both_dataset_behavior():
+    release = {
+        "solve": {"revision": "solve-sha"},
+        "reference": {"revision": "reference-sha"},
+    }
+
+    assert setup_release.select_revisions(release, "main", None) == ("main", "main")
+    assert setup_release.select_revisions(release, "solve-next", "ref-next") == (
+        "solve-next",
+        "ref-next",
+    )
 
 
 def test_validate_orca_runtime_accepts_wrapper_contract(monkeypatch):

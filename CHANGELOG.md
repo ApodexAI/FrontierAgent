@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial open-source release of FrontierAgent.
 
+### Changed
+
+- **Runtime engine moved to [`apodex-agent-core`](https://pypi.org/project/apodex-agent-core/)
+  (pinned `==0.12.0`).** The agent loop, loop contracts, tool execution,
+  compaction, observers, AgentBus, DAG and providers now come from `agent_core`;
+  `frontier_agent.*` keeps its import paths as `sys.modules` aliases or thin
+  adapters, so workflows, apodex and benchmarks are unchanged. Product policy is
+  injected through `AgentLoopHooks` / `ToolExecutionHooks` and the `configure_*`
+  resolvers (`core/runtime/loop/{agent_loop,tool_exec}.py`,
+  `components/agent_bus/bus.py`, `infra/openai_client.py`). Behaviour now
+  follows AgentCore where the fork had diverged, notably: compaction pins the
+  first user message verbatim and replaces legacy prose spill indexes, and
+  `Any`-typed tool parameters generate `{"type": "string"}` (`create_file`
+  now annotates its `rows` / `data` shorthand shapes explicitly).
+
 ### Added
 
 - **ReAct workflow**: single stateful agent with tool use, sandboxed execution,
@@ -34,10 +49,28 @@ Initial open-source release of FrontierAgent.
 - Clean-machine Linux + NVIDIA installation and release-certification guide,
   distinguishing deployment health from production agent correctness.
 
+- Standalone installation with `uv tool install`: the wheel now ships the
+  provider registry, and `frontier-agent` runs from any directory without a
+  checkout. An optional user env file (`$XDG_CONFIG_HOME/apodex/env`, default
+  `~/.config/apodex/env`, override with `APODEX_ENV_FILE`) holds the endpoint
+  below exported variables and the launch directory's `.env`; a key defined
+  next to a base URL is only applied together with that base URL.
+- `APODEX_BUILD_CONTEXT` names a checkout to build `apodex:local` from when the
+  installed CLI is not one. Without an image, a checkout, or an explicit
+  `APODEX_IMAGE`, the Docker path stops with the options instead of silently
+  running natively.
+
 ### Fixed
 
 - Surface finalize-gate bypasses on the final turn: an answer delivered despite
   open task-board items now carries an unfinished-work note and a
   `finalize_gate_bypassed` marker instead of reading as a clean success.
+- Native mode puts the CLI's own Python environment ahead of the inherited
+  `PATH`, so `read_file`, `download_file`, and `python3` inside `bash` use the
+  interpreter the CLI was installed with rather than a system Python.
+- The Docker launcher forwards the resolved runtime variables (exported
+  environment, launch directory `.env`, user env file) into the container by
+  name with `docker run -e NAME`, so an exported value now takes precedence over
+  the checkout's `.env` inside the container as it already did natively.
 - Apply benchmark question limits after seeded shuffling so repeated runs can
   sample different questions while `--no-shuffle` keeps canonical ordering.

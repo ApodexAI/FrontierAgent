@@ -7,17 +7,30 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
 import sys
+import tarfile
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_SOLVE_REPO = "apodex/FrontierChallenge"
-DEFAULT_REFERENCE_REPO = "apodex/FrontierChallenge-reference"
-DEFAULT_REVISION = "main"
+
+
+def select_revisions(
+    release: dict,
+    revision_override: str | None,
+    reference_revision_override: str | None,
+) -> tuple[str, str]:
+    """Return pinned defaults, preserving the legacy --revision override."""
+    solve_revision = revision_override or release["solve"]["revision"]
+    reference_revision = (
+        reference_revision_override
+        or revision_override
+        or release["reference"]["revision"]
+    )
+    return solve_revision, reference_revision
 
 
 def digest(path: Path) -> str:
@@ -229,6 +242,58 @@ def validate_orca_runtime(image: str) -> None:
         )
 
 
+def verify_oci_image_identity(stream, image_id: str, config_id: str) -> None:
+    """Bind a containerd manifest ID to the release's frozen config digest.
+
+    The caller has already verified the entire archive's SHA-256. Read only
+    metadata, never extract files or change Docker's storage configuration.
+    """
+    for value in (image_id, config_id):
+        if not isinstance(value, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", value):
+            raise SystemExit("invalid image identity digest")
+    member_name = "blobs/sha256/" + image_id.removeprefix("sha256:")
+    with tarfile.open(fileobj=stream, mode="r|") as archive:
+        for member in archive:
+            if member.name != member_name:
+                continue
+            if not member.isfile() or member.size > 1024 * 1024:
+                raise SystemExit("invalid OCI image manifest entry")
+            raw = archive.extractfile(member).read()
+            if "sha256:" + hashlib.sha256(raw).hexdigest() != image_id:
+                raise SystemExit("OCI image manifest digest mismatch")
+            manifest = json.loads(raw)
+            if not isinstance(manifest, dict):
+                raise SystemExit("invalid OCI image manifest")
+            config = manifest.get("config")
+            if (
+                manifest.get("schemaVersion") != 2
+                or manifest.get("mediaType") not in {
+                    "application/vnd.oci.image.manifest.v1+json",
+                    "application/vnd.docker.distribution.manifest.v2+json",
+                }
+                or not isinstance(config, dict)
+                or config.get("digest") != config_id
+            ):
+                raise SystemExit("loaded HF image configuration does not match its manifest")
+            return
+    raise SystemExit("loaded HF image identity has no matching manifest in the verified archive")
+
+
+def verify_loaded_image_identity(archive: Path, image_id: str, config_id: str) -> None:
+    # Classic Docker exposes the config digest directly. Containerd exposes an
+    # OCI target digest; verify its content-addressed manifest and config link.
+    if image_id == config_id:
+        return
+    try:
+        import zstandard
+    except ImportError as exc:
+        raise SystemExit("install runtime dependencies with `python -m pip install -e .`") from exc
+    with archive.open("rb") as source:
+        with zstandard.ZstdDecompressor().stream_reader(source) as stream:
+            verify_oci_image_identity(stream, image_id, config_id)
+    print("verified OCI manifest → published image config digest")
+
+
 def load_hf_image_archive(
     *,
     solve: Path,
@@ -272,8 +337,7 @@ def load_hf_image_archive(
     if loaded_ref != archive_config["loaded_ref"]:
         raise SystemExit("HF image loaded_ref does not match release/images.json")
     image_id = ensure_image(loaded_ref)
-    if manifest.get("image_id") != image_id:
-        raise SystemExit("loaded HF image identity does not match its manifest")
+    verify_loaded_image_identity(archive, image_id, manifest.get("image_id"))
     return image_id
 
 
@@ -284,14 +348,16 @@ def write_config(
     reference: Path,
     track: str,
     open_image: str,
-    revision: str,
+    solve_revision: str,
+    reference_revision: str,
 ) -> None:
     values = {
         "FRONTIER_SOLVE_DIR": str(solve),
         "FRONTIER_REFERENCE_DIR": str(reference),
         "FRONTIER_TRACK": track,
         "FRONTIER_OPEN_IMAGE": open_image,
-        "FRONTIER_DATASET_REVISION": revision,
+        "FRONTIER_SOLVE_REVISION": solve_revision,
+        "FRONTIER_REFERENCE_REVISION": reference_revision,
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
@@ -303,11 +369,16 @@ def write_config(
 
 def main() -> int:
     image_manifest = json.loads((ROOT / "release" / "images.json").read_text())
+    dataset_release = json.loads((ROOT / "release" / "datasets.json").read_text())
     default_image = image_manifest["images"]["open"]["ref"]
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--solve-source", default=DEFAULT_SOLVE_REPO)
-    parser.add_argument("--reference-source", default=DEFAULT_REFERENCE_REPO)
-    parser.add_argument("--revision", default=DEFAULT_REVISION)
+    parser.add_argument("--solve-source", default=dataset_release["solve"]["repo"])
+    parser.add_argument("--reference-source", default=dataset_release["reference"]["repo"])
+    parser.add_argument(
+        "--revision",
+        default=None,
+        help="override both pinned dataset revisions (for example, main)",
+    )
     parser.add_argument("--reference-revision", default=None)
     parser.add_argument("--track", choices=("open", "full"), default="open")
     parser.add_argument("--cache-dir", type=Path, default=Path.home() / ".cache/frontierchallenge")
@@ -316,18 +387,21 @@ def main() -> int:
     )
     parser.add_argument("--skip-image", action="store_true", help="verify datasets only")
     args = parser.parse_args()
+    solve_revision, reference_revision = select_revisions(
+        dataset_release, args.revision, args.reference_revision
+    )
 
     token = os.environ.get("HF_TOKEN")
     solve = resolve_dataset(
         args.solve_source,
-        args.revision,
+        solve_revision,
         args.cache_dir,
         token=token,
         ignore_patterns=["images/*.tar.zst"],
     )
     reference = resolve_dataset(
         args.reference_source,
-        args.reference_revision or args.revision,
+        reference_revision,
         args.cache_dir,
         token=token,
     )
@@ -340,7 +414,7 @@ def main() -> int:
         load_hf_image_archive(
             solve=solve,
             solve_source=args.solve_source,
-            revision=args.revision,
+            revision=solve_revision,
             cache_dir=args.cache_dir,
             archive_config=image_manifest["images"]["open"]["hf_archive"],
             token=token,
@@ -357,7 +431,8 @@ def main() -> int:
         reference=reference,
         track=args.track,
         open_image=default_image,
-        revision=args.revision,
+        solve_revision=solve_revision,
+        reference_revision=reference_revision,
     )
     print(f"ready: {len(selected)} tasks; configuration written to {args.config.resolve()}")
     return 0

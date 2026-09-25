@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "solve": {
+    "repo": "apodex/FrontierChallenge",
+    "revision": "6306f5d07fcd23c911242a36c6c923e9b2ad19bf"
+  },
+  "reference": {
+    "repo": "apodex/FrontierChallenge-reference",
+    "revision": "e3e6719c43de28cc0f0116cf1f1cd95e05825aab"
+  }
+}

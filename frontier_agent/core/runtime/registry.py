@@ -1,4 +1,12 @@
-"""Back-compat re-export. Canonical location: registries.services."""
+"""Back-compat re-export. Canonical location: registries.services.
+
+Prefer importing the implementation module directly:
+
+    from frontier_agent.core.runtime.registries import services as registry
+
+This module re-exports the service-registry API so older import paths keep
+working. New code should import ``registries.services`` instead.
+"""
 
 from frontier_agent.core.runtime.registries.services import (
     _services as _services,

@@ -6,7 +6,9 @@ Hugging Face datasets, a real Harbor + Claude Code run, and the final score.
 ## Requirements
 
 - Linux x86-64 with Docker and Compose v2;
-- Python 3.11+ and about 20 GB for the open image;
+- Python 3.12+ on the evaluator host (required by Harbor 0.20.0);
+  allow at least 40 GB of free disk for the downloaded archive,
+  Docker image, and working data (more for concurrent runs and results);
 - a model API key and a judge API key;
 - `HF_TOKEN` while either dataset is private or gated;
 - for the full track only, an official ORCA 6.0.1 download and permission to
@@ -24,6 +26,8 @@ docker compose version
 ```bash
 git clone https://github.com/ApodexAI/FrontierAgent.git
 cd FrontierAgent/benchmarks/frontierchallenge
+python3.12 -m venv .venv
+source .venv/bin/activate
 python -m pip install -e .
 cp .env.example .env
 ```
@@ -61,19 +65,32 @@ This is the shortest path for most evaluators:
 HF_TOKEN=hf_... ./scripts/setup.sh --track open
 ```
 
-Setup downloads the solve and reference datasets from their current `main` branches,
-verifies both packages, binds them to this checkout's `registry.json`, then
+Setup downloads the solve and reference revisions pinned by this Git checkout in
+`release/datasets.json`, verifies both packages, binds them to this checkout's
+`registry.json`, then
 downloads `images/frontierchallenge-cpu-open-2026.08.docker.tar.zst` from the
-solve dataset. It checks the declared size, SHA-256 and image ID before loading
-the `linux/amd64` image into Docker. No container registry is used. Evaluator-
+solve dataset. It checks the archive's declared size and SHA-256 before loading
+the `linux/amd64` image into Docker, then verifies the loaded image identity.
+No container registry is used. Evaluator-
 local paths are written to `.frontierchallenge/config.env`.
+
+Docker's classic and containerd image stores expose different image IDs. Setup
+accepts the published config digest directly, or verifies that the loaded OCI
+manifest digest links to that exact config inside the SHA-256-verified archive.
+Keep runtime dependencies current with `python -m pip install -e .`; do not
+disable identity checks or change Docker's storage backend to work around this.
+
+For release development only, `--revision main` overrides both pins;
+`--reference-revision` can override the reference revision independently. Normal
+evaluation should keep the checkout's pins so later dataset changes cannot alter
+an otherwise identical run.
 
 ### Full track: build the private ORCA runtime
 
-All 16 ORCA task statements and inputs are released normally. Only ORCA and a
-configured ORCA image are absent. Obtain ORCA 6.0.1 from its official provider,
-install it outside this checkout, and keep the complete directory together.
-Then run:
+All statements and inputs for the 16 tasks that execute ORCA are released
+normally. Only ORCA and a configured ORCA image are absent. Obtain ORCA 6.0.1
+from its official provider, install it outside this checkout, and keep the
+complete directory together. Then run:
 
 ```bash
 ./scripts/build_orca_runtime.sh \
@@ -118,6 +135,11 @@ tasks into evaluator staging, decrypts the matching verifier there, starts the
 agent, and invokes Harbor's verifier after the agent exits. By default Claude
 Code's `WebSearch` and `WebFetch` tools are disabled.
 
+Selection comes from each task's declared `task.json.environment`, validated
+against the registry. Include/exclude filters are applied before image preflight,
+staging, verifier decryption, resume, and Harbor invocation; stale directories
+from an older run cannot add tasks to the effective run.
+
 A healthy run reaches messages like:
 
 ```text
@@ -146,9 +168,13 @@ cat results/harbor/<job>/<trial>/verifier/reward.json
 ```
 
 - `evaluation_complete = 1` means the verifier finished;
-- `passed` is the task's own pass decision and must not be recomputed from a
-  global threshold;
+- official Pass Rate counts completed `task_score > 0.999` evaluations over 97;
+- `passed` uses this same strict threshold in both rewards and summaries;
 - `task_score` is a continuous score in `[0, 1]`.
+
+Score is the mean `task_score` over 97, times 100. Missing and failed evaluations
+contribute zero. Use unrounded scores: exactly `0.999` does not pass. See
+[Scoring](scoring.md) for subsets, repeated attempts, and historical results.
 
 The job aggregate is:
 

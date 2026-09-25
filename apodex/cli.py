@@ -25,25 +25,22 @@ from apodex.render import Renderer
 from apodex.session import TerminalSession
 from apodex.terminal import resolve_terminal_ui
 from apodex.tui.themes import CLI_THEME_NAMES
+from apodex.userenv import EnvResolution, load_environment
 
 if TYPE_CHECKING:
     from apodex.config import ModelConfig
 
 
-def _load_env() -> None:
+def _load_env() -> EnvResolution:
     """Load a ``.env`` (keys/base-url/model) from the launch directory or an
-    ancestor, the way FrontierAgent's own entry points do. ``override=False`` so
-    real environment variables and CLI flags always win. Must run **before**
-    any ``chdir`` so it finds the repo's ``.env`` rather than the target repo.
+    ancestor, the way FrontierAgent's own entry points do, then the optional
+    user env file underneath it. ``override=False`` so real environment
+    variables and CLI flags always win. Must run **before** any ``chdir`` so it
+    finds the repo's ``.env`` rather than the target repo, and before native
+    mode rewrites ``HOME``/``XDG_CONFIG_HOME``, so the user file is read from
+    the user's real config directory. See :mod:`apodex.userenv`.
     """
-    try:
-        from dotenv import find_dotenv, load_dotenv
-    except Exception:
-        return
-    load_dotenv(".env", override=False)
-    found = find_dotenv(usecwd=True)
-    if found:
-        load_dotenv(found, override=False)
+    return load_environment()
 
 
 # (substring in an engine log message) -> clean one-line note to surface
@@ -301,7 +298,13 @@ async def _amain(argv: list[str] | None = None) -> int:
     # keys are available (the standalone CLI isn't bootstrapped by the app).
     # (The fully-local toolchain guarantee — incl. dropping E2B_API_KEY — is
     # owned by TerminalSession._authorize_workspace.)
-    _load_env()
+    env_resolution = _load_env()
+    # Secret-free by construction (names and paths only). Printed now so the
+    # explanation precedes whatever the note is about — a preflight failure
+    # over a withheld key, say — and only once: the TUI path alone repeats
+    # them in its transcript, since its alternate screen covers stderr.
+    for note in env_resolution.notes:
+        print(f"apodex: {note}", file=sys.stderr)
 
     # Textual's Kitty keyboard negotiation drops IME commits in iTerm2.  Set
     # the compatibility fallback before either starting the native TUI or
@@ -377,7 +380,10 @@ async def _amain(argv: list[str] | None = None) -> int:
                        if a != "--docker"]
         docker_ok, docker_reason = docker_available()
         if args.docker or docker_ok:
-            return run_in_container(passthrough, cwd=cwd)
+            return run_in_container(
+                passthrough, cwd=cwd,
+                forward_env=env_resolution.forwarded_names(),
+            )
         print(
             f"apodex: Docker is unavailable ({docker_reason}); using native mode.",
             file=sys.stderr,
@@ -517,7 +523,10 @@ async def _amain(argv: list[str] | None = None) -> int:
     # stderr is written moments before Textual takes the alternate screen, so a
     # warning printed here is gone by the time the TUI is up. The TUI path
     # carries them into the transcript instead; line mode prints as before.
-    startup_warnings = [warning.message for warning in runtime_config.warnings]
+    startup_warnings = [
+        *(env_resolution.notes if use_tui else ()),
+        *(warning.message for warning in runtime_config.warnings),
+    ]
     if not use_tui:
         for message in startup_warnings:
             print(f"warning: {message}", file=sys.stderr)

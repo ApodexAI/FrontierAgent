@@ -209,7 +209,8 @@ class BenchmarkSession:
         resource_manager = ResourceManager(llm=llm, tools=tools_map)
         registry.register(ResourceManager, resource_manager)
 
-        agent_comm = AgentComm(event_store, event_bus)
+        # The OSS EventStore is a no-op sink, so AgentComm runs on its hot queues.
+        agent_comm = AgentComm(event_store, event_bus)  # pyright: ignore[reportArgumentType]
         registry.register(AgentComm, agent_comm)
         spawn_guard = SpawnGuard(
             TaskBudget(max_depth=2, max_parallel=200),

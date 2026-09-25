@@ -1,5 +1,13 @@
 # Troubleshooting
 
+## Editable install cannot resolve Harbor
+
+The pinned Harbor 0.20.0 requires Python 3.12 or newer on the evaluator host.
+Use a Python 3.12+ virtual environment as shown in [Quickstart](quickstart.md),
+then rerun `python -m pip install -e .`. Do not downgrade Harbor to work around
+an older system Python. The Python versions inside the frozen scientific task
+images are separate and do not need to change.
+
 ## Setup cannot find the datasets
 
 While either HF repository is private or gated, pass an authorized token only
@@ -11,7 +19,7 @@ HF_TOKEN=hf_... ./scripts/setup.sh --track open
 
 Do not place the HF token in `.env`, which is used to configure model and judge
 credentials. For offline use, pass local solve and reference directories as
-shown in [Quickstart](quickstart.md).
+shown in [Hugging Face layout](huggingface-release.md#download-and-verify).
 
 ## Docker is installed but runs do not start
 
@@ -40,6 +48,11 @@ or distribute it. After obtaining and installing ORCA officially, run:
 The build helper runs a real ORCA calculation, and the runner checks the local
 image again before any selected ORCA task starts.
 
+An open task may still mention ORCA because it reads supplied output files.
+That does not require the licensed runtime: preflight follows the task's
+registry-backed execution environment, not instruction text. For example,
+`task_098_orca_claisen_thermochemistry` belongs to the open track.
+
 ## Every task fails during agent setup
 
 Check that `.env` contains the key required by the selected agent and that the
@@ -67,6 +80,22 @@ Inspect `verifier/reward.json`:
 
 The aggregate summarizer reports incomplete and missing-artifact counts instead
 of silently treating every zero as the same failure mode.
+
+## An old job is refused after upgrading
+
+The runner refuses populated jobs without a matching scoring/log policy marker
+or with a changed task selection. Start a fresh `--job-name` (or `--jobs-dir`).
+Do not manufacture a marker for old results: their raw rewards may use the old
+per-task pass rule. Old results remain untouched and may be summarized separately.
+
+## Loaded image identity differs on Docker's containerd store
+
+Update the runtime and reinstall its dependencies (`python -m pip install -e .`).
+Older setup code compares Docker's OCI manifest ID directly with the release's
+config digest, which can reject a valid image on Docker 29/containerd. Current
+setup verifies the manifest-to-config digest link inside the verified archive.
+Archive size/SHA-256 and platform checks remain mandatory; no daemon restart,
+storage-driver change, registry pull, or HF payload update is needed.
 
 ## Inspect a trial
 

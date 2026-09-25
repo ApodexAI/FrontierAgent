@@ -34,6 +34,9 @@ from frontier_agent.core.runtime.loop.tiered_compact import (
 )
 from plugins.tools import _overflow
 
+# ``_with_spill_manifest`` reads the per-instance manifest limits (defaults).
+_MANIFEST_COMPACTOR = TieredCompactor(keep_tool_result=1, summary_llm=None, relief_target=1)
+
 
 @pytest.fixture(autouse=True)
 def _isolate_spill_registry():
@@ -449,7 +452,7 @@ def test_spill_refs_recovers_run_dir_manifest_paths() -> None:
     """The run-dir branch emits ``spill/`` (no dot). Keying the harvest on the
     workspace ``.spill/`` spelling loses every ref on a second Tier 2 pass."""
     refs = ["/runs/task-1/spill/2f9c/00-web_fetch.md"]
-    manifest = TieredCompactor._with_spill_manifest(
+    manifest = _MANIFEST_COMPACTOR._with_spill_manifest(
         [{"role": "system", "content": "system"}], refs,
     )
     assert TieredCompactor._spill_refs(manifest) == refs
@@ -457,7 +460,7 @@ def test_spill_refs_recovers_run_dir_manifest_paths() -> None:
 
 def test_spill_refs_keeps_native_paths_with_spaces() -> None:
     refs = ["/tmp/My Workspace/spill/2f9c/00-web_fetch.md"]
-    manifest = TieredCompactor._with_spill_manifest(
+    manifest = _MANIFEST_COMPACTOR._with_spill_manifest(
         [{"role": "system", "content": "system"}], refs,
     )
     assert TieredCompactor._spill_refs(manifest) == refs
@@ -494,22 +497,22 @@ def test_prose_is_never_harvested_as_a_ref() -> None:
     ]
 
 
-def test_a_legacy_prose_index_is_left_in_place_rather_than_lost() -> None:
-    """A history checkpointed before the field existed keeps its index message,
-    so the paths stay readable by the model even though they are not harvested.
-    The fresh index is added alongside; it is the one later passes replace."""
+def test_a_legacy_prose_index_is_replaced_by_the_fresh_one() -> None:
+    """A history checkpointed before the ``spill_refs`` field existed has its
+    prose index recognised by header and replaced, so the model never sees two
+    competing indexes (AgentCore behaviour)."""
     legacy = {
         "role": "user",
         "content": f"{_SPILL_MANIFEST_HEADER}\n- /workspace/.spill/old/a.md\n",
     }
 
-    out = TieredCompactor._with_spill_manifest(
+    out = _MANIFEST_COMPACTOR._with_spill_manifest(
         [{"role": "system", "content": "s"}, legacy],
         ["/workspace/.spill/new/b.md"],
     )
 
     bodies = [text_of(m.get("content")) for m in out]
-    assert any("/workspace/.spill/old/a.md" in b for b in bodies)
+    assert sum(1 for b in bodies if b.startswith(_SPILL_MANIFEST_HEADER)) == 1
     assert any("/workspace/.spill/new/b.md" in b for b in bodies)
     assert sum(1 for m in out if m.get("spill_refs")) == 1
 
@@ -531,8 +534,10 @@ def test_deterministic_summary_drops_a_manifest_instead_of_truncating_it() -> No
     compacted = compact_messages(messages, keep_recent=1)
     content = "\n".join(str(m.get("content", "")) for m in compacted)
 
-    assert _SPILL_MANIFEST_HEADER not in content
-    assert "/workspace/.spill/2f9c/" not in content
+    # The first user message is pinned verbatim, so the path survives whole
+    # rather than as a truncated, re-harvestable fragment.
+    assert long_path in content
+    assert "/workspace/.spill/2f9c/" + "d" * 10 not in content.replace(long_path, "")
     assert TieredCompactor._spill_refs(compacted) == []
 
 
@@ -644,7 +649,7 @@ def test_spill_manifest_keeps_only_latest_twenty_paths() -> None:
     assert "Read-only recovery index" in _SPILL_MANIFEST_HEADER
     assert "Never write here" in _SPILL_MANIFEST_HEADER
     refs = [f"/workspace/.spill/session/{idx:02d}.md" for idx in range(25)]
-    result = TieredCompactor._with_spill_manifest(
+    result = _MANIFEST_COMPACTOR._with_spill_manifest(
         [{"role": "system", "content": "system"}], refs,
     )
     content = "\n".join(str(message.get("content", "")) for message in result)
@@ -656,11 +661,11 @@ def test_spill_manifest_keeps_only_latest_twenty_paths() -> None:
 def test_spill_manifest_update_is_idempotent() -> None:
     first = "/workspace/.spill/session/first.md"
     second = "/workspace/.spill/session/second.md"
-    result = TieredCompactor._with_spill_manifest(
+    result = _MANIFEST_COMPACTOR._with_spill_manifest(
         [{"role": "system", "content": "system"}], [first],
     )
     refs = TieredCompactor._spill_refs(result)
-    result = TieredCompactor._with_spill_manifest(result, [*refs, second])
+    result = _MANIFEST_COMPACTOR._with_spill_manifest(result, [*refs, second])
     content = "\n".join(str(message.get("content", "")) for message in result)
     assert content.count(_SPILL_MANIFEST_HEADER) == 1
     assert first in content
@@ -1000,10 +1005,11 @@ def test_llm_summary_empty_rollback_uses_source_messages() -> None:
         keep_recent=1,
         compress_all_tool_results=True,
     ))
-    assert len(result) == 3
+    # system + pinned first user message + summary + recent.
+    assert len(result) == 4
     # This marker only exists in ``source_messages`` after tool-result compression;
     # rolling back over the original ``messages`` would contain raw x characters.
-    assert "[Compressed tool result:" in result[1]["content"]
+    assert "[Compressed tool result:" in result[2]["content"]
 
 
 def test_a_summary_quoting_the_header_is_left_alone() -> None:
@@ -1028,7 +1034,7 @@ def test_a_summary_quoting_the_header_is_left_alone() -> None:
     }
     messages = [{"role": "system", "content": "system"}, summary]
 
-    out = TieredCompactor._with_spill_manifest(
+    out = _MANIFEST_COMPACTOR._with_spill_manifest(
         messages, ["/workspace/.spill/session/real.md"],
     )
 
@@ -1353,8 +1359,8 @@ def test_a_legacy_full_text_placeholder_is_still_harvested() -> None:
 def test_the_index_is_replaced_not_duplicated_across_passes() -> None:
     messages = [{"role": "system", "content": "s"}, {"role": "user", "content": "q"}]
 
-    first = TieredCompactor._with_spill_manifest(messages, ["/ws/.spill/s/a.md"])
-    second = TieredCompactor._with_spill_manifest(
+    first = _MANIFEST_COMPACTOR._with_spill_manifest(messages, ["/ws/.spill/s/a.md"])
+    second = _MANIFEST_COMPACTOR._with_spill_manifest(
         first, ["/ws/.spill/s/a.md", "/ws/.spill/s/b.md"],
     )
 
@@ -1368,7 +1374,7 @@ def test_the_index_never_reaches_a_provider() -> None:
     """``spill_refs`` is in-process bookkeeping; ``for_wire`` is what enforces it."""
     from frontier_agent.core.messages import WIRE_MESSAGE_KEYS, for_wire
 
-    out = TieredCompactor._with_spill_manifest(
+    out = _MANIFEST_COMPACTOR._with_spill_manifest(
         [{"role": "user", "content": "q"}], ["/ws/.spill/s/a.md"],
     )
     index = next(m for m in out if m.get("spill_refs"))

@@ -57,12 +57,38 @@ class ProviderNotFound(KeyError):
         )
 
 
+def _packaged_default_path() -> Path | None:
+    """The copy of ``config/providers.yaml`` shipped inside the wheel.
+
+    ``pyproject.toml`` force-includes the checked-in registry next to this
+    module, so an installation outside a checkout (``uv tool install``) still
+    has a provider registry to resolve ``llm.provider:`` against. ``None``
+    when running from a source tree that has not been built, where the
+    checkout copy is the one to use anyway.
+    """
+    try:
+        from importlib.resources import files
+
+        candidate = Path(str(files(__package__).joinpath("providers.yaml")))
+    except Exception:
+        return None
+    return candidate if candidate.is_file() else None
+
+
 def _providers_path() -> Path:
-    """Resolve the providers.yaml path, honoring the env override."""
+    """Resolve the providers.yaml path, honoring the env override.
+
+    Order: ``FRONTIER_AGENT_PROVIDERS_PATH`` → the checkout's
+    ``config/providers.yaml`` → the copy packaged in the wheel. The checkout
+    path is also what a missing-file error names, so the message stays the
+    same for a source tree that lost the file.
+    """
     override = os.environ.get("FRONTIER_AGENT_PROVIDERS_PATH")
     if override:
         return Path(override)
-    return _DEFAULT_PATH
+    if _DEFAULT_PATH.is_file():
+        return _DEFAULT_PATH
+    return _packaged_default_path() or _DEFAULT_PATH
 
 
 def _load_raw_yaml(*, refresh: bool = False) -> dict[str, Any]:
