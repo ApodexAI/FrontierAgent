@@ -483,7 +483,8 @@ class TerminalSession(TaskRunnerMixin):
         self.display_history = list(messages)
         # _persist() does synchronous file I/O over the full history; run it
         # off the event loop so long sessions don't stall on every turn.
-        # Awaited (not fire-and-forget) so writes stay ordered turn-to-turn.
+        # Awaited between turns; _persist_lock also serializes snapshots and
+        # writes if cancellation leaves this worker running in the background.
         await asyncio.to_thread(self._persist)
 
     # ── persistence (interrupt-safe resume) ───────────────────────────────
@@ -611,42 +612,45 @@ class TerminalSession(TaskRunnerMixin):
 
             from apodex.todo import get_todos
 
-            snapshot = getattr(self.r, "snapshot_state", None)
-            if callable(snapshot):
-                raw_tui_state = snapshot()
-                self.tui_state = raw_tui_state if isinstance(raw_tui_state, dict) else {}
-
-            path = _session_state_path(self.session_id)
-            payload = {
-                "session_id": self.session_id,
-                "created_at": self.created_at,
-                "local_timezone": self.local_timezone,
-                "name": self.session_name,
-                "mode": self.mode,
-                "cwd": self.cwd,
-                "model": self.cfg.model,
-                # Native messages are plain OpenAI-wire dicts — already
-                # JSON-serializable, so they round-trip verbatim (no
-                # langchain messages_to_dict / messages_from_dict needed).
-                "history": list(self.history),
-                "display_history": list(self.display_history),
-                "workflow_turns": list(self.workflow_turns),
-                "usage": self.usage.to_dict(),
-                "tui": dict(self.tui_state),
-                "outputs": {
-                    "agent_root": os.environ.get("FRONTIER_AGENT_OUTPUTS_DIR", ""),
-                    "host_root": os.environ.get("APODEX_HOST_OUTPUTS_DIR", ""),
-                },
-                "journal": self.journal.to_dict(),
-                "journal_observed": self.journal.observed_paths(),
-                "journal_revert_base": self.journal.revert_bases(),
-                "plan_active": bool(self.plan_state.active),
-                "todos": [
-                    {"content": item.content, "status": item.status}
-                    for item in get_todos()
-                ],
-            }
+            # Snapshot under the same lock as the write: a cancelled
+            # to_thread worker can otherwise overwrite a newer checkpoint
+            # with a payload it captured before waiting for this lock.
             with self._persist_lock:
+                snapshot = getattr(self.r, "snapshot_state", None)
+                if callable(snapshot):
+                    raw_tui_state = snapshot()
+                    self.tui_state = raw_tui_state if isinstance(raw_tui_state, dict) else {}
+
+                path = _session_state_path(self.session_id)
+                payload = {
+                    "session_id": self.session_id,
+                    "created_at": self.created_at,
+                    "local_timezone": self.local_timezone,
+                    "name": self.session_name,
+                    "mode": self.mode,
+                    "cwd": self.cwd,
+                    "model": self.cfg.model,
+                    # Native messages are plain OpenAI-wire dicts — already
+                    # JSON-serializable, so they round-trip verbatim (no
+                    # langchain messages_to_dict / messages_from_dict needed).
+                    "history": list(self.history),
+                    "display_history": list(self.display_history),
+                    "workflow_turns": list(self.workflow_turns),
+                    "usage": self.usage.to_dict(),
+                    "tui": dict(self.tui_state),
+                    "outputs": {
+                        "agent_root": os.environ.get("FRONTIER_AGENT_OUTPUTS_DIR", ""),
+                        "host_root": os.environ.get("APODEX_HOST_OUTPUTS_DIR", ""),
+                    },
+                    "journal": self.journal.to_dict(),
+                    "journal_observed": self.journal.observed_paths(),
+                    "journal_revert_base": self.journal.revert_bases(),
+                    "plan_active": bool(self.plan_state.active),
+                    "todos": [
+                        {"content": item.content, "status": item.status}
+                        for item in get_todos()
+                    ],
+                }
                 os.makedirs(os.path.dirname(path), exist_ok=True)
                 tmp_path = f"{path}.{os.getpid()}.{threading.get_ident()}.tmp"
                 with open(tmp_path, "w", encoding="utf-8") as f:
