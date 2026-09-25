@@ -208,7 +208,7 @@ wheels = [
 
 [[package]]
 name = "apodex-agent-core"
-version = "0.11.1"
+version = "0.12.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anthropic", extra = ["bedrock"] },
@@ -218,9 +218,9 @@ dependencies = [
     { name = "pydantic" },
     { name = "pyyaml" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/2e/58/dcf766920c7c6d5f3440c50de0cf0321f37d98d1f23a375f280860fa44aa/apodex_agent_core-0.11.1.tar.gz", hash = "sha256:0a7ff45cca8bb28defb27b91bd9ec3bb683ec2ac15d9f98286b9f14ead6edb62", size = 770101, upload-time = "2026-09-24T02:40:23.04Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/8c/06/b9554a14ef408eee8edebc0ef99239ded5a6beedfd193d93696d2f6f426c/apodex_agent_core-0.12.0.tar.gz", hash = "sha256:ab1bbbe300019467c262c8ae5c30215fb12981ef35fe454ac697cf7af6af6f33", size = 775922, upload-time = "2026-09-25T07:06:25.678Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/dc/72/f2e0e18155ffedb12134e970542605fdf3a94462313ea16c71c1426f9343/apodex_agent_core-0.11.1-py3-none-any.whl", hash = "sha256:0007378a0a370a8994ce67fa48ad6451b4d8182646c4acc2399afbfc5d7bd615", size = 538591, upload-time = "2026-09-24T02:40:21.097Z" },
+    { url = "https://files.pythonhosted.org/packages/80/1c/deef046f86b374327de671d360670472ef9e3f82eb5368bb5d63d652727d/apodex_agent_core-0.12.0-py3-none-any.whl", hash = "sha256:dc9365f4553730fecd053794994f1218f522534674df8a42048e29bbeff6a179", size = 539404, upload-time = "2026-09-25T07:06:24.325Z" },
 ]
 
 [[package]]
@@ -1013,7 +1013,7 @@ sandbox = [
 [package.metadata]
 requires-dist = [
     { name = "anthropic", specifier = ">=0.87.0" },
-    { name = "apodex-agent-core", specifier = "==0.11.1" },
+    { name = "apodex-agent-core", specifier = "==0.12.0" },
     { name = "browserbase", marker = "extra == 'plugins'", specifier = ">=0.1.0" },
     { name = "datasets", marker = "extra == 'eval'", specifier = ">=4.8.4" },
     { name = "e2b-code-interpreter", marker = "extra == 'sandbox'", specifier = ">=2.6.0" },

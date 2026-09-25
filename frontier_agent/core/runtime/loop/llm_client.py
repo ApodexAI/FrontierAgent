@@ -21,7 +21,6 @@ from agent_core.runtime.loop._streaming import ThinkTagSplitter
 from agent_core.tokens import estimate_message_tokens, estimate_text_tokens
 
 from frontier_agent.core.runtime.loop._bind import (
-    _ensure_bound,
     bind_max_tokens,
     bind_session_id,
     bind_temperature,
@@ -37,7 +36,6 @@ __all__ = [
     "LLMReasoningRunaway",
     "LLMStreamStalled",
     "ThinkTagSplitter",
-    "_ensure_bound",
     "bind_max_tokens",
     "bind_session_id",
     "bind_temperature",

@@ -27,6 +27,13 @@ from plugins.tools._sandbox import (
 
 logger = logging.getLogger(__name__)
 
+# Shorthand payload shapes, spelled out so every schema node carries a concrete
+# ``type``: strict function-schema validators reject an untyped property, and
+# ``Any`` would degrade to ``string`` and reject nested rows instead.
+_Scalar = str | int | float | bool
+_Rows = list[list[_Scalar] | dict[str, Any]]
+_JsonArray = list[dict[str, Any] | list[_Scalar] | _Scalar]
+
 _WRITER_SRC = writer_src()
 _DOC_EXTS = {"docx", "xlsx", "pptx"}
 _TEXT_EXTS = {"txt", "md", "csv", "tsv", "json", "jsonl", "html", "htm"}
@@ -210,8 +217,8 @@ def desugar_text_shorthand(
     *,
     ops: list[dict[str, Any]] | str | None,
     content: str | None,
-    rows: list[Any] | str | None,
-    data: dict[str, Any] | list[Any] | str | None,
+    rows: _Rows | str | None,
+    data: dict[str, Any] | _JsonArray | str | None,
     overwrite: bool = False,
 ) -> tuple[list[dict[str, Any]] | str | None, str]:
     """Fold a top-level ``content``/``rows``/``data`` into one ``create`` op.
@@ -258,8 +265,8 @@ async def create_file(
     path: str,
     ops: list[dict[str, Any]] | str | None = None,
     content: str | None = None,
-    rows: list[Any] | str | None = None,
-    data: dict[str, Any] | list[Any] | str | None = None,
+    rows: _Rows | str | None = None,
+    data: dict[str, Any] | _JsonArray | str | None = None,
     overwrite: bool = False,
 ) -> str:
     """Create or edit a deliverable file in the sandbox — office (docx/xlsx/pptx)
@@ -547,11 +554,3 @@ async def create_file(
         )
     return result.stdout or "(no output)"
 
-
-# The schema generator maps ``Any`` to ``{"type": "string"}``, which would make
-# schema-aware providers reject nested csv rows and JSON arrays. Items of these
-# shorthand arrays are genuinely open.
-for _name in ("rows", "data"):
-    for _option in create_file.parameters["properties"][_name].get("anyOf", []):
-        if _option.get("type") == "array":
-            _option["items"] = {}

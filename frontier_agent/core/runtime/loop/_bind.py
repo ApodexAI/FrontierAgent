@@ -8,9 +8,6 @@ from agent_core.runtime.loop._bind import (
     _BoundLLM as _BoundLLM,
 )
 from agent_core.runtime.loop._bind import (
-    _ensure_bound as _ensure_bound,
-)
-from agent_core.runtime.loop._bind import (
     bind_max_tokens,
     bind_temperature,
     bind_tools,
@@ -34,7 +31,6 @@ def bind_session_id(llm: Any, task_id: str) -> Any:
 
 __all__ = [
     "_BoundLLM",
-    "_ensure_bound",
     "bind_max_tokens",
     "bind_session_id",
     "bind_temperature",

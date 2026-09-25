@@ -12,7 +12,7 @@ Initial open-source release of FrontierAgent.
 ### Changed
 
 - **Runtime engine moved to [`apodex-agent-core`](https://pypi.org/project/apodex-agent-core/)
-  (pinned `==0.11.1`).** The agent loop, loop contracts, tool execution,
+  (pinned `==0.12.0`).** The agent loop, loop contracts, tool execution,
   compaction, observers, AgentBus, DAG and providers now come from `agent_core`;
   `frontier_agent.*` keeps its import paths as `sys.modules` aliases or thin
   adapters, so workflows, apodex and benchmarks are unchanged. Product policy is
@@ -22,7 +22,7 @@ Initial open-source release of FrontierAgent.
   follows AgentCore where the fork had diverged, notably: compaction pins the
   first user message verbatim and replaces legacy prose spill indexes, and
   `Any`-typed tool parameters generate `{"type": "string"}` (`create_file`
-  restores open `items` for its shorthand arrays).
+  now annotates its `rows` / `data` shorthand shapes explicitly).
 
 ### Added
 

@@ -8,7 +8,7 @@ requires-python = ">=3.12"
 dependencies = [
     # Runtime engine (agent loop, tools, observers, sub-agents, DAG). Pinned exactly:
     # 0.x MINOR bumps may be breaking.
-    "apodex-agent-core==0.11.1",
+    "apodex-agent-core==0.12.0",
     "pydantic>=2.0",
     "pydantic-settings>=2.14.2",
     "openai>=1.50",
