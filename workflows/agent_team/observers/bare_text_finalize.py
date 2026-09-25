@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
+from typing import Any
 
 from frontier_agent.core.execution_context import get_current_execution_scope
 from frontier_agent.core.loop_types import BaseObserver, Intervention, TurnContext
@@ -12,13 +14,14 @@ from plugins.tools.task_board import unresolved_task_ids
 logger = logging.getLogger(__name__)
 
 
-def _unfinished_note(task_id: str, text: str) -> str:
-    """Footnote an answer that is being delivered despite a blocked gate.
+def _build_bypass_warning(task_id: str) -> str:
+    """Build the standalone warning for an answer delivered past a blocked gate.
 
-    The last turn must not lose the answer to ``max_turns`` (see the bypass
-    below), but an unfinished run must never read as a clean success: name the
-    board items that are still unresolved so the reader can tell which parts
-    of the answer were never corroborated.
+    Built once while the task board is still live — the board is cleared
+    before the workflow output is assembled — and stored in
+    ``finalize_gate_warning`` for the delivery nodes to append after any
+    finalization that would otherwise strip it (the reporter's References
+    cleanup drops everything after that heading).
     """
     pending = unresolved_task_ids(task_id)
     if pending:
@@ -26,11 +29,25 @@ def _unfinished_note(task_id: str, text: str) -> str:
     else:
         what = "the finalize gate was still rejecting this submission"
     return (
-        f"{text}\n\n---\n\n"
+        "\n\n---\n\n"
         f"> ⚠ Unfinished work at submission: {what}. This answer was "
         "delivered on the final turn despite the gate — conclusions that "
         "depend on that work are unverified."
     )
+
+
+def append_bypass_warning(text: str, source: Mapping[str, Any] | None) -> str:
+    """Re-attach the stored bypass warning at a delivery boundary, once.
+
+    The observer stores the ready-made warning; the delivery nodes append
+    it *after* finalization (reporter References cleanup would strip an
+    earlier append). Idempotent: text already carrying the warning is
+    returned unchanged.
+    """
+    warning = str((source or {}).get("finalize_gate_warning") or "")
+    if not warning or not text or warning in text:
+        return text
+    return f"{text.rstrip()}{warning}"
 
 
 class BareTextFinalizeObserver(BaseObserver):
@@ -61,11 +78,14 @@ class BareTextFinalizeObserver(BaseObserver):
             if err:
                 # Last-turn bypass: the gate says BLOCK, but the answer is
                 # delivered anyway rather than lost to max_turns. Keep that
-                # fallback — and make it visible (machine-readable marker
-                # plus a user-visible note), so an unfinished run is never
-                # presented as a clean success.
+                # fallback — and make it visible: store the gate message and
+                # a ready-to-append warning (built while the board is live).
+                # The visible text is appended by the delivery nodes AFTER
+                # reporter finalization, which would strip it otherwise.
                 ctx.metadata["finalize_gate_bypassed"] = err
-                text = _unfinished_note(ctx.task_id, text)
+                ctx.metadata["finalize_gate_warning"] = _build_bypass_warning(
+                    ctx.task_id,
+                )
             ctx.metadata["final_answer"] = text
             ctx.metadata["final_answer_confidence"] = 1.0
         logger.info(
