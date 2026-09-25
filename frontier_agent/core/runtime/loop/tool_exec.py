@@ -1,19 +1,31 @@
-"""Parallel tool execution for the agent loop."""
+"""FrontierAgent policies for AgentCore's shared tool execution engine.
+
+AgentCore owns dispatch (parallelism, interrupts, error envelopes); this module
+supplies the product policy through :class:`ToolExecutionHooks`: per-tool
+timeout floors, the bash budget contextvar, usage metering, the configurable
+result cap with spill, and the per-turn aggregate budget.
+"""
 
 from __future__ import annotations
 
-import asyncio
-import time
-from collections.abc import Callable, Coroutine
-from contextlib import suppress
+from collections.abc import Awaitable, Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import replace
-from typing import Any, Protocol, runtime_checkable
+from typing import Any
+
+from agent_core.runtime.loop.tool_exec import (
+    DefaultToolResultPostProcessor,
+    ToolExecutionHooks,
+    ToolLike,
+    ToolResultPostProcessor,
+)
+from agent_core.runtime.loop.tool_exec import execute_tools as _execute_tools
 
 from frontier_agent.core.loop_types import ToolResult
-from frontier_agent.core.tool import Tool
 
 __all__ = [
     "PROTECTED_FANIN_TOOLS",
+    "TOOL_EXECUTION_HOOKS",
     "TOOL_RESULT_MAX_CHARS",
     "DefaultToolResultPostProcessor",
     "ToolResultPostProcessor",
@@ -89,214 +101,6 @@ PROTECTED_FANIN_TOOLS = _AGGREGATION_TOOLS | frozenset(
 )
 
 
-@runtime_checkable
-class ToolResultPostProcessor(Protocol):
-    """Transforms a :class:`ToolResult` into the string that enters
-    the tool-result message in the conversation history.
-
-    Receives the full :class:`ToolResult` (including ``name``, ``args``,
-    ``is_error``) so implementations can dispatch per-tool: e.g. a
-    ``bash`` processor that keeps stderr + tail of stdout, a
-    ``web_fetch`` processor that preserves title + head, a
-    ``file_editor`` processor that never truncates.
-
-    Called once per tool result, after the loop's hard 16k safety cap
-    from :func:`execute_tools` has already been applied, so the
-    processor is working with at most ``TOOL_RESULT_MAX_CHARS`` of
-    input. Return value replaces ``tool_result.result`` in the message
-    content only — the ``ToolResult`` object itself (observed by
-    observers, recorded in evidence) stays unchanged.
-    """
-
-    def process(self, tool_result: ToolResult) -> str:
-        ...
-
-
-class DefaultToolResultPostProcessor:
-    """Default: apply the configured ``tool_result_max_chars`` cap.
-
-    Mirrors the inline slice that lived in ``agent_loop.py`` before this
-    Protocol was extracted. A ``max_chars`` of ``None`` means
-    pass-through; otherwise the result is truncated and a tail marker
-    is appended so downstream consumers can see that the content was
-    cut.
-    """
-
-    def __init__(self, max_chars: int | None = None) -> None:
-        self._max_chars = max_chars
-
-    def process(self, tool_result: ToolResult) -> str:
-        content = tool_result.result
-        cap = self._max_chars
-        if cap and isinstance(content, str) and len(content) > cap:
-            return (
-                content[:cap]
-                + f"\n\n[... truncated {len(content) - cap} chars past {cap}-char cap]"
-            )
-        return content if isinstance(content, str) else str(content)
-
-
-async def execute_tools(
-    tool_calls: list[dict],
-    tool_map: dict[str, Tool],
-    timeout: int,
-    turn: int,
-    count_offset: int,
-    interrupt_waiter: Callable[[dict], Coroutine[Any, Any, bool]] | None = None,
-) -> list[ToolResult]:
-    """Execute ``tool_calls`` in parallel, returning one ``ToolResult`` each.
-
-    Unknown tools, timeouts, and exceptions all come back as
-    ``is_error=True`` results. Long output strings are truncated at
-    ``TOOL_RESULT_MAX_CHARS`` with a tail marker so downstream history
-    trimming doesn't have to special-case giant tool returns. The cap
-    sits at 150K — wide enough that a full academic paper (markdown of a
-    Nature/IEEE-length article runs 50-100K chars) and a long Wikipedia
-    article fit without truncation. Per-workflow back-stops
-    (e.g. swarm's ReasoningStripCompactor at 200K total context) handle
-    the multi-fetch case by aging old tool bodies to URL stubs.
-    """
-
-    async def _run_one(call: dict, idx: int) -> ToolResult:
-        name = call.get("name", "")
-        args = call.get("args", {})
-        tool_call_id = call.get("id") or f"call_{turn}_{count_offset + idx}"
-        tool = tool_map.get(name)
-        start = time.monotonic()
-
-        if tool is None:
-            available = ", ".join(sorted(tool_map)) or "(none)"
-            return ToolResult(
-                name=name,
-                args=args,
-                result=(
-                    f"Error: unknown tool '{name}' is not available. "
-                    f"Available tools: {available}. Call one of these instead."
-                ),
-                duration_ms=0,
-                tool_call_id=tool_call_id,
-                is_error=True,
-            )
-
-        effective_timeout = _effective_tool_timeout(name, args, timeout)
-        tool_budget = _tool_budget(name, effective_timeout)
-
-        # Count at the shared execution point so every loop contributes to the
-        # top-level usage summary. This is a no-op when no meter is bound.
-        from frontier_agent.infra.usage_meter import record_tool_call
-        record_tool_call(name)
-
-        # Expose this tool's id to nested code via a
-        # task-local contextvar so dispatcher tools (delegate_subtask /
-        # assign_task) can stamp ``spawn_context.spawned_by_tool_call_id``
-        # on the sub-agent they spawn. ``asyncio.gather`` gives each
-        # ``_run_one`` task its own context copy so parallel tools don't
-        # observe each other's id.
-        from frontier_agent.core.execution_context import (
-            reset_current_tool_budget,
-            reset_current_tool_call_id,
-            set_current_tool_budget,
-            set_current_tool_call_id,
-        )
-        _tc_token = set_current_tool_call_id(tool_call_id)
-        _budget_token = set_current_tool_budget(tool_budget)
-        invoke_task: asyncio.Task | None = None
-        interrupt_task: asyncio.Task | None = None
-        woke_for_interrupt = False
-        try:
-            if interrupt_waiter is not None and name in _AGGREGATION_TOOLS:
-                invoke_task = asyncio.create_task(asyncio.wait_for(
-                    tool.ainvoke(args),
-                    timeout=effective_timeout,
-                ))
-                interrupt_task = asyncio.create_task(interrupt_waiter(call))
-                done, _ = await asyncio.wait(
-                    {invoke_task, interrupt_task},
-                    return_when=asyncio.FIRST_COMPLETED,
-                )
-                woke_for_interrupt = (
-                    interrupt_task in done and bool(interrupt_task.result())
-                )
-                if woke_for_interrupt and not invoke_task.done():
-                    invoke_task.cancel()
-                    with suppress(asyncio.CancelledError):
-                        await invoke_task
-                    elapsed = int((time.monotonic() - start) * 1000)
-                    return ToolResult(
-                        name=name,
-                        args=args,
-                        result=(
-                            "[interrupted] Waiting for sub-agent reports was "
-                            "cancelled because a new user message arrived."
-                        ),
-                        duration_ms=elapsed,
-                        tool_call_id=tool_call_id,
-                        is_error=False,
-                        interrupted=True,
-                    )
-                raw = await invoke_task
-            else:
-                raw = await asyncio.wait_for(
-                    tool.ainvoke(args),
-                    timeout=effective_timeout,
-                )
-            result_str = str(raw) if raw is not None else ""
-            if len(result_str) > _result_cap():
-                result_str = _truncate_with_recovery(name, result_str)
-            elapsed = int((time.monotonic() - start) * 1000)
-            return ToolResult(
-                name=name,
-                args=args,
-                result=result_str,
-                duration_ms=elapsed,
-                tool_call_id=tool_call_id,
-                is_error=False,
-                # If a report and a user message became ready in the same event
-                # loop tick, preserve the real report and still tell the loop
-                # to inject the already-claimed user message before its next
-                # LLM request.
-                interrupted=woke_for_interrupt,
-            )
-        except TimeoutError:
-            elapsed = int((time.monotonic() - start) * 1000)
-            return ToolResult(
-                name=name,
-                args=args,
-                result=(
-                    f"Error: tool '{name}' timed out after "
-                    f"{effective_timeout}s"
-                ),
-                duration_ms=elapsed,
-                tool_call_id=tool_call_id,
-                is_error=True,
-                interrupted=woke_for_interrupt,
-            )
-        except Exception as exc:
-            elapsed = int((time.monotonic() - start) * 1000)
-            return ToolResult(
-                name=name,
-                args=args,
-                result=f"Error: {type(exc).__name__}: {exc}",
-                duration_ms=elapsed,
-                tool_call_id=tool_call_id,
-                is_error=True,
-                interrupted=woke_for_interrupt,
-            )
-        finally:
-            if interrupt_task is not None and not interrupt_task.done():
-                interrupt_task.cancel()
-                with suppress(asyncio.CancelledError):
-                    await interrupt_task
-            if invoke_task is not None and not invoke_task.done():
-                invoke_task.cancel()
-                with suppress(asyncio.CancelledError):
-                    await invoke_task
-            reset_current_tool_budget(_budget_token)
-            reset_current_tool_call_id(_tc_token)
-
-    tasks = [_run_one(call, i) for i, call in enumerate(tool_calls)]
-    results = await asyncio.gather(*tasks)
-    return _apply_aggregate_budget(list(results))
 
 
 def _effective_tool_timeout(name: str, args: dict, default_timeout: int) -> int:
@@ -418,3 +222,72 @@ def max_tool_wall_time_s(tool_timeout: float) -> float:
     decision rather than smuggled in here.
     """
     return max(float(tool_timeout), 0.0) + _BUDGET_GRACE_S
+
+
+@contextmanager
+def _tool_call_scope(call: dict[str, Any], timeout: float) -> Iterator[None]:
+    """Expose the tool-call id and (for budget-aware tools) its deadline.
+
+    Dispatcher tools (assign_task / create_subagent) stamp the id on the
+    sub-agent they spawn; ``bash`` reads the budget so its own timeout fires
+    before the loop's outer wait.
+    """
+    from frontier_agent.core.execution_context import (
+        reset_current_tool_budget,
+        reset_current_tool_call_id,
+        set_current_tool_budget,
+        set_current_tool_call_id,
+    )
+
+    name = str(call.get("name", "") or "")
+    tc_token = set_current_tool_call_id(str(call.get("id", "") or ""))
+    budget_token = set_current_tool_budget(_tool_budget(name, int(timeout)))
+    try:
+        yield
+    finally:
+        reset_current_tool_budget(budget_token)
+        reset_current_tool_call_id(tc_token)
+
+
+def _record_tool_call(name: str) -> None:
+    from frontier_agent.infra.usage_meter import record_tool_call
+
+    record_tool_call(name)
+
+
+def _transform_result(name: str, result: str) -> str:
+    return _truncate_with_recovery(name, result) if len(result) > _result_cap() else result
+
+
+def _timeout_result(name: str, _elapsed_s: float, effective_timeout: float) -> str:
+    return f"Error: tool '{name}' timed out after {int(effective_timeout)}s"
+
+
+TOOL_EXECUTION_HOOKS = ToolExecutionHooks(
+    resolve_timeout=lambda name, args, timeout: float(_effective_tool_timeout(name, args, timeout)),
+    call_scope=_tool_call_scope,
+    on_call=_record_tool_call,
+    transform_result=_transform_result,
+    transform_batch=_apply_aggregate_budget,
+    timeout_result=_timeout_result,
+)
+
+
+async def execute_tools(
+    tool_calls: list[dict],
+    tool_map: dict[str, ToolLike],
+    timeout: int,
+    turn: int,
+    count_offset: int,
+    interrupt_waiter: Callable[[dict], Awaitable[bool]] | None = None,
+) -> list[ToolResult]:
+    """Execute ``tool_calls`` in parallel with the product policies applied."""
+    return await _execute_tools(
+        tool_calls,
+        tool_map,
+        timeout=timeout,
+        turn=turn,
+        count_offset=count_offset,
+        interrupt_waiter=interrupt_waiter,
+        hooks=TOOL_EXECUTION_HOOKS,
+    )

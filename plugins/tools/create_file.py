@@ -546,3 +546,12 @@ async def create_file(
             f"create_file writer exited {result.exit_code}: {_failure_detail(result)}"
         )
     return result.stdout or "(no output)"
+
+
+# The schema generator maps ``Any`` to ``{"type": "string"}``, which would make
+# schema-aware providers reject nested csv rows and JSON arrays. Items of these
+# shorthand arrays are genuinely open.
+for _name in ("rows", "data"):
+    for _option in create_file.parameters["properties"][_name].get("anyOf", []):
+        if _option.get("type") == "array":
+            _option["items"] = {}

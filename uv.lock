@@ -6,10 +6,10 @@ resolution-markers = [
     "python_full_version >= '3.14' and sys_platform == 'emscripten'",
     "python_full_version >= '3.14' and sys_platform != 'emscripten' and sys_platform != 'win32'",
     "python_full_version == '3.13.*' and sys_platform == 'win32'",
-    "python_full_version < '3.13' and sys_platform == 'win32'",
     "python_full_version == '3.13.*' and sys_platform == 'emscripten'",
-    "python_full_version < '3.13' and sys_platform == 'emscripten'",
     "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "python_full_version < '3.13' and sys_platform == 'win32'",
+    "python_full_version < '3.13' and sys_platform == 'emscripten'",
     "python_full_version < '3.13' and sys_platform != 'emscripten' and sys_platform != 'win32'",
 ]
 
@@ -187,6 +187,12 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/ad/5b/db4a854aebf5d33a5ab714c46af6eb85ee44f390ed29b7b325c00b9f11ed/anthropic-1.0.0-py3-none-any.whl", hash = "sha256:32dd52e9e1d774393b27182f451398ba4262287a4d0eab30887f89f1481b3ae4", size = 1171725, upload-time = "2026-08-20T19:58:58.725Z" },
 ]
 
+[package.optional-dependencies]
+bedrock = [
+    { name = "boto3" },
+    { name = "botocore" },
+]
+
 [[package]]
 name = "anyio"
 version = "4.14.2"
@@ -198,6 +204,23 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/61/cc/a381afa6efea9f496eff839d4a6a1aed3bfafc7b3ab4b0d1b243a12573dd/anyio-4.14.2.tar.gz", hash = "sha256:cfa139f3ed1a23ee8f88a145ddb5ac7605b8bbfd8592baacd7ce3d8bb4313c7f", size = 260176, upload-time = "2026-07-12T20:29:07.082Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/da/35/f2287558c17e29fafc8ef3daf819bb9834061cfa43bff8014f7df7f63bdc/anyio-4.14.2-py3-none-any.whl", hash = "sha256:9f505dda5ac9f0c8309b5e8bd445a8c2bf7246f3ce950121e45ea15bc41d1494", size = 125813, upload-time = "2026-07-12T20:29:05.763Z" },
+]
+
+[[package]]
+name = "apodex-agent-core"
+version = "0.11.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "anthropic", extra = ["bedrock"] },
+    { name = "httpx" },
+    { name = "jinja2" },
+    { name = "openai" },
+    { name = "pydantic" },
+    { name = "pyyaml" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/2e/58/dcf766920c7c6d5f3440c50de0cf0321f37d98d1f23a375f280860fa44aa/apodex_agent_core-0.11.1.tar.gz", hash = "sha256:0a7ff45cca8bb28defb27b91bd9ec3bb683ec2ac15d9f98286b9f14ead6edb62", size = 770101, upload-time = "2026-09-24T02:40:23.04Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/dc/72/f2e0e18155ffedb12134e970542605fdf3a94462313ea16c71c1426f9343/apodex_agent_core-0.11.1-py3-none-any.whl", hash = "sha256:0007378a0a370a8994ce67fa48ad6451b4d8182646c4acc2399afbfc5d7bd615", size = 538591, upload-time = "2026-09-24T02:40:21.097Z" },
 ]
 
 [[package]]
@@ -925,6 +948,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "anthropic" },
+    { name = "apodex-agent-core" },
     { name = "httpx" },
     { name = "jinja2" },
     { name = "openai" },
@@ -989,6 +1013,7 @@ sandbox = [
 [package.metadata]
 requires-dist = [
     { name = "anthropic", specifier = ">=0.87.0" },
+    { name = "apodex-agent-core", specifier = "==0.11.1" },
     { name = "browserbase", marker = "extra == 'plugins'", specifier = ">=0.1.0" },
     { name = "datasets", marker = "extra == 'eval'", specifier = ">=4.8.4" },
     { name = "e2b-code-interpreter", marker = "extra == 'sandbox'", specifier = ">=2.6.0" },
@@ -1338,8 +1363,8 @@ name = "httpcore2"
 version = "2.12.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "h11", marker = "sys_platform != 'emscripten'" },
-    { name = "truststore", marker = "sys_platform != 'emscripten'" },
+    { name = "h11" },
+    { name = "truststore" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/be/ad/f4f0e57345f1870f3e8cb624e058d7eca6e5a27d33bcc3311d9b618734cd/httpcore2-2.12.0.tar.gz", hash = "sha256:9293522bba0aa7c4c8e9e3f040c16575bd8868e155a77fa30c7a9085a5eae648", size = 67548, upload-time = "2026-08-18T13:22:08.211Z" }
 wheels = [

@@ -1,4 +1,4 @@
-"""DAG execution — MiniDAG engine + DynamicGraphBuilder."""
+"""DAG execution — MiniDAG Pregel engine + DynamicGraphBuilder."""
 
 from frontier_agent.core.runtime.dag.graph_builder import (
     DynamicGraphBuilder,

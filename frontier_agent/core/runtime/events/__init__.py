@@ -1,5 +1,3 @@
-"""Event infrastructure — in-memory async bus only."""
+from agent_core.runtime.events import EventBus, Handler
 
-from frontier_agent.core.runtime.events.bus import EventBus
-
-__all__ = ["EventBus"]
+__all__ = ["EventBus", "Handler"]
