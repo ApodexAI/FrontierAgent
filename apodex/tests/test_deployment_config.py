@@ -39,6 +39,7 @@ def test_default_compose_pulls_release_image_and_preserves_cli_state() -> None:
     assert agent["pull_policy"] == "always"
     assert agent["environment"]["APODEX_IN_CONTAINER"] == "1"
     assert agent["environment"]["SANDBOX_BACKEND"] == "container"
+    assert agent["environment"]["FRONTIER_AGENT_REQUIRE_TOOL_USER"] == "1"
     assert "security_opt" not in agent
     assert ".:/project" in agent["volumes"]
     assert agent["working_dir"] == "/project"
@@ -57,6 +58,10 @@ def test_default_compose_pulls_release_image_and_preserves_cli_state() -> None:
         "/apodex-runs"
     )
     assert agent["environment"]["APODEX_WORKSPACE_LINK"] == "/workspace"
+
+    evaluator = compose["services"]["eval"]
+    assert evaluator["environment"]["SANDBOX_BACKEND"] == "bwrap"
+    assert evaluator["environment"]["SANDBOX_PROFILE"] == "service"
 
 
 def test_development_compose_is_the_only_compose_file_that_builds() -> None:
