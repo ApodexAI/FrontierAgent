@@ -9,6 +9,10 @@ services:
       APODEX_IN_CONTAINER: "1"
       HOME: /root
       SANDBOX_BACKEND: container
+      # A missing agent-tool account would expose the harness environment to
+      # model-authored commands through /proc.  Service deployments must stop
+      # instead of accepting the documented env-only degradation.
+      FRONTIER_AGENT_REQUIRE_TOOL_USER: "1"
       APODEX_LOCAL_UTC_OFFSET: ${APODEX_LOCAL_UTC_OFFSET:-+0000}
       FRONTIER_AGENT_WORKSPACE_DIR: /workspace
       APODEX_SESSION_WORKSPACES_ROOT: /apodex-runs
@@ -51,6 +55,9 @@ services:
       # The eval runner can execute multiple isolated benchmark tasks in one
       # harness container, so it retains the nested bubblewrap backend.
       SANDBOX_BACKEND: bwrap
+      # Multi-task workers need a private PID namespace and fresh procfs.  The
+      # service profile fails closed when the runtime cannot provide them.
+      SANDBOX_PROFILE: service
       APODEX_HOST_UID: ${APODEX_HOST_UID:-}
       APODEX_HOST_GID: ${APODEX_HOST_GID:-}
     volumes:
