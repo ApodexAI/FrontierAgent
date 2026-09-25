@@ -434,10 +434,8 @@ def _bind_sub_agent_llm(runtime: Any | None) -> Any | None:
             eff_max_tokens,
         )
     try:
-        from dataclasses import replace
-
-        from frontier_agent.core.runtime.loop.llm_client import _ensure_bound
-        bound = replace(_ensure_bound(llm), max_tokens=eff_max_tokens)
+        from frontier_agent.core.runtime.loop.llm_client import bind_max_tokens
+        bound = bind_max_tokens(llm, eff_max_tokens)
     except Exception:
         bound = llm
     stream_cfg = getattr(runtime, "stream_repetition_config", None)

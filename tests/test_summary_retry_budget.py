@@ -15,7 +15,7 @@ import time
 
 import pytest
 
-from frontier_agent.core.runtime.loop import compact_llm
+from agent_core.runtime.loop import compact_llm  # knobs live in the shared module
 from frontier_agent.core.runtime.loop.compact_llm import (
     LLMSummaryCompactor,
     is_transient_summary_error,

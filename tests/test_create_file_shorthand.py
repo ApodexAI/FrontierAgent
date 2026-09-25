@@ -67,8 +67,23 @@ def test_the_tool_schema_accepts_the_advertised_json_shapes() -> None:
         if option.get("type") == "array"
     )
 
-    assert rows_array["items"] == {}
-    assert data_array["items"] == {}
+    # Nested csv rows and jsonl objects must both validate.
+    row_shapes = {option["type"] for option in rows_array["items"]["anyOf"]}
+    assert row_shapes == {"array", "object"}
+    data_shapes = {option["type"] for option in data_array["items"]["anyOf"]}
+    assert {"array", "object", "string"} <= data_shapes
+
+    # Strict function-schema validators reject a node without a ``type``.
+    def untyped(node: object) -> list[object]:
+        if isinstance(node, dict):
+            own = [node] if "type" not in node and "anyOf" not in node else []
+            return own + [bad for child in node.values() for bad in untyped(child)]
+        if isinstance(node, list):
+            return [bad for child in node for bad in untyped(child)]
+        return []
+
+    assert untyped(properties["rows"]["anyOf"]) == []
+    assert untyped(properties["data"]["anyOf"]) == []
 
 
 def test_empty_string_content_still_folds() -> None:
