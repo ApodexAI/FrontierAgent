@@ -101,6 +101,11 @@ packages = ["frontier_agent", "apodex", "plugins", "workflows", "benchmarks"]
 # that package is enforced — see pyrightconfig.json for what is currently gated.
 [tool.hatch.build.targets.wheel.force-include]
 "frontier_agent/py.typed" = "frontier_agent/py.typed"
+# The provider registry lives at the repository root, outside every package.
+# A checkout reads it from there; an installed wheel has no repository root,
+# so the same file ships next to its loader (frontier_agent/infra/providers.py
+# falls back to this copy when config/providers.yaml is absent).
+"config/providers.yaml" = "frontier_agent/infra/providers.yaml"
 
 [tool.uv]
 # Security floors for transitive packages reported by Dependabot. Keeping these
