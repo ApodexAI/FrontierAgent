@@ -104,6 +104,7 @@ from workflows.agent_team.identity import (
 from workflows.agent_team.observers.auto_fan_in import AutoFanInObserver
 from workflows.agent_team.observers.bare_text_finalize import (
     BareTextFinalizeObserver,
+    append_bypass_warning,
 )
 from workflows.agent_team.observers.console import RichConsoleObserver
 from workflows.agent_team.observers.no_progress_guard import NoProgressGuard
@@ -1667,6 +1668,13 @@ async def main_agent_node(
             url_repair_stats["unmatched"], url_repair_stats["checked"],
         )
 
+    # Re-attach the finalize-gate bypass warning (if any) only now: the
+    # observer stores it while the board is live, and this is the delivery
+    # boundary for the coordinator's own answer. When the reporter runs it
+    # re-appends on its own freshly finalized text (References cleanup would
+    # strip an earlier append) — see review on #48.
+    final_text = append_bypass_warning(final_text, result.metadata)
+
     if reporter_enabled and result.metadata.get("report_handoff"):
         logger.info(
             "agent_team: research stopped by %s; advancing to downstream reporter",
@@ -1708,6 +1716,12 @@ async def main_agent_node(
             result.metadata.get("final_answer_rescue_mode") or "",
         ),
         "final_answer_source": answer_source,
+        "finalize_gate_bypassed": str(
+            result.metadata.get("finalize_gate_bypassed") or "",
+        ),
+        "finalize_gate_warning": str(
+            result.metadata.get("finalize_gate_warning") or "",
+        ),
         # Conditional edge in both agent-team specs consumes this resolved
         # per-request value. False routes directly to END, preserving the
         # coordinator's answer as the protocol final.

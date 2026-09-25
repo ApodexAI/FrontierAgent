@@ -337,6 +337,16 @@ async def agent_team_reporter(
     if not report_md.strip():
         return {}
 
+    # Re-attach the finalize-gate bypass warning now: References cleanup
+    # inside the chain has already run, so this append survives it — the
+    # observer's stored warning is the same one main_agent would have
+    # appended had the reporter not replaced the answer (review on #48).
+    from workflows.agent_team.observers.bare_text_finalize import (
+        append_bypass_warning,
+    )
+
+    report_md = append_bypass_warning(report_md, state)
+
     try:
         _refresh_trace_terminal(state.get("metadata") or {}, report_md)
     except Exception as exc:
@@ -355,4 +365,6 @@ async def agent_team_reporter(
         "final_answer_source": "reporter_llm",
         "final_answer_rescued": False,
         "final_answer_rescue_mode": "",
+        "finalize_gate_bypassed": str(state.get("finalize_gate_bypassed") or ""),
+        "finalize_gate_warning": str(state.get("finalize_gate_warning") or ""),
     }
