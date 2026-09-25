@@ -347,6 +347,9 @@ def run_in_container(
         "-v", f"{home_state}:/root/.apodex",
         "-v", f"{home_config}:/root/.config/apodex",
         "-e", "APODEX_IN_CONTAINER=1",
+        # The host already selected and resolved the user env file. The
+        # mounted default config directory must not supply a second one.
+        "-e", "APODEX_USER_ENV_RESOLVED=1",
         "-e", "HOME=/root",
         # Same contract as the Compose launchers: files written by the dropped-
         # privilege tool process keep useful host ownership. The entrypoint
@@ -389,8 +392,20 @@ def run_in_container(
     # environment, so the resolved key is never an argv token. Ordering after
     # --env-file is what lets the host-resolved value win over the checkout's
     # file, matching the exported-environment precedence native runs have.
+    # Host files may also configure native execution. Preserve every explicit
+    # container setting above, and keep host interpreter/config paths and the
+    # higher-priority sandbox alias out of the container environment.
+    reserved_names = {
+        docker_cmd[index + 1].partition("=")[0]
+        for index, arg in enumerate(docker_cmd[:-1]) if arg == "-e"
+    }
+    reserved_names.update({
+        "APODEX_SANDBOX", "APODEX_ENV_FILE", "PATH", "PYTHONPATH",
+        "PYTHONHOME", "VIRTUAL_ENV", "XDG_CONFIG_HOME", "XDG_CACHE_HOME",
+        "XDG_STATE_HOME", "XDG_DATA_HOME", "XDG_RUNTIME_DIR", "TMPDIR",
+    })
     for name in dict.fromkeys(forward_env):
-        if name in os.environ:
+        if name in os.environ and name not in reserved_names:
             docker_cmd += ["-e", name]
     docker_cmd += [image, "apodex", *_without_cwd_arg(argv)]
 

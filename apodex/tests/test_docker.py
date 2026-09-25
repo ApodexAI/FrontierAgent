@@ -483,3 +483,42 @@ def test_forwarded_names_follow_the_checkout_env_file(monkeypatch, tmp_path) -> 
     command = calls[0]
     assert command.index("--env-file") < command.index("OPENAI_MODEL")
     assert command[command.index("--env-file") + 1] == str(checkout / ".env")
+
+
+def test_forwarded_host_settings_cannot_replace_container_runtime(monkeypatch, tmp_path) -> None:
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+    calls = _stub_container(monkeypatch, tmp_path)
+    host_settings = {
+        "SANDBOX_BACKEND": "bwrap",
+        "APODEX_SANDBOX": "bwrap",
+        "HOME": "/host/home",
+        "PATH": "/host/venv/bin:/usr/bin",
+        "PYTHONPATH": "/host/packages",
+        "XDG_CONFIG_HOME": "/host/config",
+        "FRONTIER_AGENT_WORKSPACE_DIR": "/host/workspace",
+        "APODEX_IN_CONTAINER": "0",
+        "APODEX_USER_ENV_RESOLVED": "0",
+        "CUSTOM_PROVIDER_TOKEN": "synthetic-token",
+    }
+    for name, value in host_settings.items():
+        monkeypatch.setenv(name, value)
+
+    assert docker.run_in_container(
+        [], cwd=str(workspace), image="test-image", forward_env=tuple(host_settings),
+    ) == 0
+
+    command = calls[0]
+    settings = {}
+    for index, arg in enumerate(command[:-1]):
+        if arg == "-e":
+            name, separator, value = command[index + 1].partition("=")
+            settings[name] = value if separator else os.environ[name]
+    assert settings["SANDBOX_BACKEND"] == "container"
+    assert settings["HOME"] == "/root"
+    assert settings["FRONTIER_AGENT_WORKSPACE_DIR"] == "/workspace"
+    assert settings["APODEX_IN_CONTAINER"] == "1"
+    assert settings["APODEX_USER_ENV_RESOLVED"] == "1"
+    for name in ("APODEX_SANDBOX", "PATH", "PYTHONPATH", "XDG_CONFIG_HOME"):
+        assert name not in settings
+    assert settings["CUSTOM_PROVIDER_TOKEN"] == "synthetic-token"

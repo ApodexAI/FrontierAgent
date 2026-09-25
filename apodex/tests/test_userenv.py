@@ -490,3 +490,64 @@ def test_withheld_key_explains_the_preflight_failure_once(
     assert err.index("was not applied") < err.index("preflight failed")
     assert _SECRET not in err
     assert cli_harness.constructed == []
+
+
+@pytest.mark.parametrize("selection", ["disabled", "custom", "withheld"])
+def test_container_does_not_reload_default_user_file(
+    launch, user_file, monkeypatch, tmp_path, selection,
+) -> None:
+    from types import SimpleNamespace
+
+    from apodex import docker
+
+    _write(user_file, (
+        f"OPENAI_API_KEY={_SECRET}\n"
+        "OPENAI_BASE_URL=https://default.example/v1\nOPENAI_MODEL=default-model\n"
+    ))
+    if selection == "disabled":
+        monkeypatch.setenv(USER_ENV_FILE_VAR, os.devnull)
+    else:
+        selected = _write(tmp_path / "selected.env", (
+            "OPENAI_MODEL=selected-model\n" if selection == "custom" else
+            f"OPENAI_API_KEY={_OTHER_SECRET}\nOPENAI_BASE_URL=https://selected.example/v1\n"
+        ))
+        monkeypatch.setenv(USER_ENV_FILE_VAR, str(selected))
+    if selection == "withheld":
+        monkeypatch.setenv("OPENAI_BASE_URL", "https://override.example/v1")
+
+    host = load_environment()
+    assert "OPENAI_API_KEY" not in os.environ
+    monkeypatch.setattr(docker, "docker_available", lambda: (True, "available"))
+    monkeypatch.setattr(docker, "image_exists", lambda image: True)
+    monkeypatch.setattr(docker, "_REPO_ROOT", tmp_path / "site-packages")
+    calls = []
+    monkeypatch.setattr(docker.subprocess, "run", lambda command: (
+        calls.append(command) or SimpleNamespace(returncode=0)
+    ))
+    assert docker.run_in_container(
+        [], cwd=str(launch), image="test-image", forward_env=host.forwarded_names(),
+    ) == 0
+
+    # Replay the actual launcher's environment, with the mounted config
+    # directory represented by its temporary host path. No Docker needed.
+    container_env = {}
+    for index, arg in enumerate(calls[0][:-1]):
+        if arg == "-e":
+            name, separator, value = calls[0][index + 1].partition("=")
+            container_env[name] = value if separator else os.environ[name]
+    container_env["HOME"] = str(user_file.parents[2])
+    with monkeypatch.context() as inner:
+        for name in tuple(os.environ):
+            inner.delenv(name)
+        for name, value in container_env.items():
+            inner.setenv(name, value)
+        result = load_environment()
+        assert result.user_env_path is None
+        assert result.applied == ()
+        assert "OPENAI_API_KEY" not in os.environ
+        assert os.environ.get("OPENAI_MODEL") == (
+            "selected-model" if selection == "custom" else None
+        )
+        assert os.environ.get("OPENAI_BASE_URL") == (
+            "https://override.example/v1" if selection == "withheld" else None
+        )

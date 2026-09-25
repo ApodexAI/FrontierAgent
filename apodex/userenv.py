@@ -293,6 +293,12 @@ def load_environment() -> EnvResolution:
             with contextlib.suppress(OSError, UnicodeDecodeError):
                 file_names.update(dict.fromkeys(_read_env_file(candidate)))
 
+    # Our Docker launcher forwards the host's resolved values. Its mounted
+    # default config directory may contain a different file from the one the
+    # host selected (or intentionally skipped with APODEX_ENV_FILE=/dev/null).
+    if os.environ.get("APODEX_USER_ENV_RESOLVED") == "1":
+        return EnvResolution(None, tuple(dotenv_paths), (), (), (), tuple(file_names))
+
     path, applied, withheld, notes, defined = apply_user_env(os.environ)
     file_names.update(dict.fromkeys(defined))
     return EnvResolution(
