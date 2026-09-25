@@ -1290,6 +1290,44 @@ def test_assess_with_rules_layering(tmp_path):
     assert r2.level == RISK_SAFE
 
 
+def test_saved_allow_does_not_cover_substitution(tmp_path):
+    """Issue #39: ``Bash(echo)`` must not authorize ``echo $(pip install x)``."""
+    from apodex.agent_tools import RISK_CONFIRM, assess_with_rules
+    from apodex.permissions import PermissionStore
+
+    cwd = str(tmp_path)
+    rules = PermissionStore(allow={"Bash(echo)"})
+    assert not rules.allows("bash", {"command": "echo $(pip install evil-pkg)"})
+    assert not rules.allows("bash", {"command": "echo `pip install evil-pkg`"})
+    r = assess_with_rules(
+        "bash", {"command": "echo $(pip install evil-pkg)"}, cwd, rules
+    )
+    assert r.level == RISK_CONFIRM
+    assert r.danger == "installs dependencies"
+
+
+def test_saved_allow_does_not_cover_force_push(tmp_path):
+    """Issue #39: ``Bash(git push)`` must not downgrade a force-push confirm."""
+    from apodex.agent_tools import RISK_CONFIRM, assess_with_rules
+    from apodex.permissions import PermissionStore
+
+    cwd = str(tmp_path)
+    rules = PermissionStore(allow={"Bash(git push)"})
+    r = assess_with_rules(
+        "bash", {"command": "git push --force origin main"}, cwd, rules
+    )
+    assert r.level == RISK_CONFIRM
+    assert r.danger == "git force-push"
+
+
+def test_single_quoted_substitution_is_literal(tmp_path):
+    """Single-quoted ``$(...)`` is not expanded by the shell — still allowed."""
+    from apodex.permissions import PermissionStore
+
+    rules = PermissionStore(allow={"Bash(echo)"})
+    assert rules.allows("bash", {"command": "echo '$(pip install x)'"})
+
+
 def test_user_settings_save_and_load(tmp_path):
     from apodex.config import UserSettings
     p = str(tmp_path / "settings.json")
