@@ -284,6 +284,21 @@ def localize_path_args(name: str, args: dict, cwd: str) -> dict | None:
         except Exception:
             continue
         if not (rel == ".." or rel.startswith(".." + os.sep)):
+            # Native workflow mode deliberately separates the user's project
+            # (cwd) from its run-private execution workspace. The workflow
+            # read_file resolves relative paths in that private workspace, so
+            # converting a correct absolute project path to "README.md" would
+            # make it read the wrong filesystem location.
+            runtime_workspace = os.environ.get(
+                "FRONTIER_AGENT_WORKSPACE_DIR", ""
+            ).strip()
+            if name == "read_file" and runtime_workspace:
+                try:
+                    workspace_real = os.path.realpath(runtime_workspace)
+                except Exception:
+                    workspace_real = ""
+                if workspace_real and workspace_real != cwd_real:
+                    return None
             new = dict(args)
             new[key] = rel or "."
             return new
