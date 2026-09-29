@@ -254,7 +254,7 @@ _WRAPPER_VALUE_RE = re.compile(r"\d+(\.\d+)?[a-zA-Z]?\Z")
 # Options whose following word belongs to the wrapper, not its command
 # (``env -u UNUSED bash`` / ``timeout --signal TERM 5 bash``).
 _WRAPPER_OPTION_VALUES = {
-    "env": {"-u", "--unset", "-C", "--chdir"},
+    "env": {"-u", "--unset", "-C", "--chdir", "-S", "--split-string"},
     "sudo": {"-u", "--user", "-g", "--group", "-h", "--host", "-p", "--prompt"},
     "timeout": {"-s", "--signal", "-k", "--kill-after"},
     "nice": {"-n", "--adjustment"},
@@ -292,6 +292,104 @@ _REDIRECT_RE = re.compile(
     r"^(?:\d+|&)?(?:<<<|<<-?|<&|>&|>>|>\||<>|<|>)(.*)$",
 )
 _REDIRECT_SENTINEL = "\x1e"
+
+
+_ANSI_C_SIMPLE_ESCAPES = {
+    "a": "\a", "b": "\b", "e": "\x1b", "E": "\x1b", "f": "\f", "n": "\n",
+    "r": "\r", "t": "\t", "v": "\v", "\\": "\\", "'": "'", '"': '"', "?": "?",
+}
+
+
+def _decode_ansi_c(body: str) -> str:
+    """Decode the escapes bash applies inside ``$'...'``. Unknown escapes keep
+    their backslash, as bash does, so decoding never fails."""
+    out: list[str] = []
+    i, n = 0, len(body)
+    while i < n:
+        c = body[i]
+        if c != "\\" or i + 1 >= n:
+            out.append(c)
+            i += 1
+            continue
+        e = body[i + 1]
+        if e in _ANSI_C_SIMPLE_ESCAPES:
+            out.append(_ANSI_C_SIMPLE_ESCAPES[e])
+            i += 2
+        elif e in "01234567":
+            m = re.match(r"[0-7]{1,3}", body[i + 1:])
+            digits = m.group(0) if m else e
+            out.append(chr(int(digits, 8) & 0xFF))
+            i += 1 + len(digits)
+        elif e in "xuU":
+            limit = {"x": 2, "u": 4, "U": 8}[e]
+            m = re.match(rf"[0-9A-Fa-f]{{1,{limit}}}", body[i + 2:])
+            if m:
+                try:
+                    out.append(chr(int(m.group(0), 16)))
+                except (ValueError, OverflowError):
+                    out.append("\ufffd")
+                i += 2 + len(m.group(0))
+            else:
+                out.append(body[i:i + 2])
+                i += 2
+        elif e == "c" and i + 2 < n:
+            out.append(chr(ord(body[i + 2]) & 0x1F))
+            i += 3
+        else:
+            out.append(body[i:i + 2])
+            i += 2
+    return "".join(out)
+
+
+def _normalize_ansi_c_quotes(command: str) -> str:
+    """Rewrite every unquoted ``$'...'`` word into the equivalent plain
+    single-quoted word.
+
+    ``shlex`` does not know ANSI-C quoting: it read ``bash -c $'sudo id'`` as
+    the payload ``$sudo id`` — an executable named ``$sudo`` that matched no
+    rule — and the ``\\'`` escape it allows also desynchronised every quote
+    tracker in this module. Normalising once, before any scanner runs, gives
+    all of them (and the recursion into payloads) the text bash executes.
+    """
+    if "$'" not in command:
+        return command
+    out: list[str] = []
+    i, n = 0, len(command)
+    quote: str | None = None
+    while i < n:
+        c = command[i]
+        if quote:
+            out.append(c)
+            if c == "\\" and quote == '"' and i + 1 < n:
+                out.append(command[i + 1])
+                i += 2
+                continue
+            if c == quote:
+                quote = None
+            i += 1
+            continue
+        if c == "\\" and i + 1 < n:
+            out.append(command[i:i + 2])
+            i += 2
+            continue
+        if c == "$" and command[i + 1:i + 2] == "'":
+            j = i + 2
+            while j < n and command[j] != "'":
+                j += 2 if command[j] == "\\" else 1
+            body = command[i + 2:min(j, n)]
+            decoded = _decode_ansi_c(body)
+            out.append("'" + decoded.replace("'", "'\"'\"'") + "'")
+            if j >= n:
+                # Unterminated: keep the opening quote unbalanced so the parser
+                # reports it instead of silently accepting the text.
+                out.append("'")
+            i = j + 1
+            continue
+        if c in ("'", '"'):
+            quote = c
+        out.append(c)
+        i += 1
+    return "".join(out)
 
 
 def tokenize_shell_segment(segment: str) -> list[str]:
@@ -1866,6 +1964,7 @@ def _raw_screen_views(command: str, depth: int = 0, root: str | None = None) -> 
     dynamic command name (``$x``, ``$(...)``) at any depth screens ``root``, the
     whole original command.
     """
+    command = _normalize_ansi_c_quotes(command)
     root = _strip_comments(command) if root is None else root
     if depth > _MAX_NEST:
         return [_strip_comments(command)]
@@ -1888,6 +1987,8 @@ def _raw_screen_views(command: str, depth: int = 0, root: str | None = None) -> 
         nested.extend(shell_code)
         evaluator_code, evaluator_fallback = _evaluator_payloads(tokens)
         nested.extend(evaluator_code)
+        env_code = _env_split_payloads(tokens)
+        nested.extend(env_code)
         if evaluator_fallback:
             views.append(seg)
         resolved = strip_command_prefixes(tokens)
@@ -1901,6 +2002,7 @@ def _raw_screen_views(command: str, depth: int = 0, root: str | None = None) -> 
             _treats_words_as_data(resolved)
             or shell_code
             or evaluator_code
+            or env_code
             # Path execution is useful for write/run correlation, but an
             # arbitrary /usr/bin/tool is not thereby a known data consumer.
             or _executed_script_operands(resolved)
@@ -1944,6 +2046,64 @@ def _raw_screen_views(command: str, depth: int = 0, root: str | None = None) -> 
 _WHOLE_TEXT_DENY_PATTERNS = frozenset({r"\bDROP\s+TABLE\b"})
 
 
+def _env_split_payloads(tokens: list[str]) -> list[str]:
+    """Command strings ``env -S`` / ``--split-string`` splits and RUNS.
+
+    ``env -S 'sudo id'`` executes ``sudo id``, but as one shell word it looked
+    like a single argument and the real command was never assessed. The
+    payload is returned with the remaining words appended, as env does.
+    """
+    out: list[str] = []
+    for k, tok in enumerate(tokens):
+        if _basename(tok) != "env":
+            continue
+        i = k + 1
+        while i < len(tokens):
+            t = tokens[i]
+            payload: str | None = None
+            if t in ("-S", "--split-string"):
+                if i + 1 >= len(tokens):
+                    break
+                payload, i = tokens[i + 1], i + 2
+            elif t.startswith("--split-string="):
+                payload, i = t.partition("=")[2], i + 1
+            elif t.startswith("-") and not t.startswith("--") and "S" in t[1:]:
+                rest = t[t.index("S", 1) + 1:]
+                if rest:
+                    payload, i = rest, i + 1
+                elif i + 1 < len(tokens):
+                    payload, i = tokens[i + 1], i + 2
+                else:
+                    break
+            if payload is not None:
+                out.append(" ".join([payload, *(shlex.quote(w) for w in tokens[i:])]))
+                break
+            if t == "--" or not t.startswith("-"):
+                break
+            i += 2 if t in _WRAPPER_OPTION_VALUES["env"] else 1
+    return out
+
+
+def _unknown_evaluator_words(argv: list[str]) -> list[str]:
+    """Words of an evaluator whose argument form is not recognised
+    (``su``, ``parallel``, an unknown ``tmux`` subcommand …).
+
+    Its payload cannot be separated from its options, so the always-denied
+    group check looks at every word instead of guessing: ``parallel ::: 'sudo
+    id'`` is refused rather than allowed.
+    """
+    code, fallback = _evaluator_payloads(argv)
+    if not fallback or code:
+        return []
+    words: list[str] = []
+    for tok in argv:
+        try:
+            words.extend(shlex.split(tok))
+        except ValueError:
+            words.extend(tok.split())
+    return words
+
+
 def _is_command_lookup(argv: list[str]) -> bool:
     """``command -v X`` / ``command -V X`` asks whether ``X`` exists; it does
     not run it."""
@@ -1971,6 +2131,14 @@ def _argv_group_deny(commands: list[list[str]]) -> tuple[str, str] | None:
     for argv in commands:
         if _is_command_lookup(argv):
             continue
+        for word in _unknown_evaluator_words(argv):
+            base = _basename(word)
+            if base in _PRIV_ESC:
+                return "priv_esc", _DENY_GROUP_PRIV_ESC[base]
+            hit = _ALWAYS_DENIED_BINARIES.get(base)
+            if hit is not None:
+                group, reason = hit
+                return group, f"`{base}`: {reason}"
         exe, rest = _resolve_exe(argv)
         if exe is None:
             continue
@@ -1991,6 +2159,7 @@ def _parse_commands(command: str, depth: int = 0) -> list[list[str]]:
     ``eval`` / ``bash -c`` (also ``-lc``), in ``find -exec`` payloads, and in
     shell heredoc bodies. Raises :class:`_ParseError` when a top-level segment
     can't be tokenised (unbalanced quotes)."""
+    command = _normalize_ansi_c_quotes(command)
     stripped, heredoc_bodies = _strip_heredoc_bodies(command)
     # After heredoc bodies are out of the way (their ``#`` lines are data/code,
     # not shell comments) drop the shell's own comments.
@@ -2028,6 +2197,12 @@ def _parse_commands(command: str, depth: int = 0) -> list[list[str]]:
         # ``timeout 10 bash -lc …`` / ``xargs sh -c …`` are recognised as
         # nested shells (not just bare ``bash``/``eval`` at argv[0]).
         nested.extend(_shell_code_args(raw_argv))
+        # Code other runners execute: ``watch 'x'`` / ``script -c 'x'`` /
+        # ``tmux new 'x'`` / ``ssh host 'x'``, and ``env -S 'x'``. The word
+        # screens already recursed into these; without this the group check
+        # (Layer 1.5) and the allowlist never saw ``watch 'sudo id'``.
+        nested.extend(_evaluator_payloads(raw_argv)[0])
+        nested.extend(_env_split_payloads(raw_argv))
     for sub in nested:
         if sub.strip():
             # Unparseable nested code — the outer parse already recorded it.
@@ -2173,7 +2348,7 @@ def assess_bash_command(
     # The same holds for data: heredoc bodies and quoted arguments routinely
     # carry prose ("an exchange halt applies"), so the word screens only see
     # the text the shell executes (see ``_raw_screen_views``).
-    executable_text = _strip_comments(normalized)
+    executable_text = _strip_comments(_normalize_ansi_c_quotes(normalized))
     screen_text = "\n".join(_raw_screen_views(normalized))
     for pattern, reason in _DENY_PATTERNS:
         text = executable_text if pattern in _WHOLE_TEXT_DENY_PATTERNS else screen_text

