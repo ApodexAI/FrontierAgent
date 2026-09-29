@@ -62,6 +62,20 @@ Initial open-source release of FrontierAgent.
 
 ### Fixed
 
+- Bash policy: privilege escalation (`sudo`/`su`/…), remote/exfil clients
+  (`ssh`/`nc`/`rsync`/…) and signal senders (`kill`/`pkill`/`killall`) are now
+  refused in every allowlist mode, including the default `off`. The local CLI
+  sends them to the human as a typed confirmation that auto-approve, `auto_for_me`
+  and saved rules cannot answer.
+- Bash policy: command substitutions are located by one scanner for both
+  masking and extraction, so quoted parens, apostrophes in double quotes and
+  unterminated `$(` no longer hide a nested command; `$((…))` arithmetic is no
+  longer assessed as a command.
+- Bash policy: the host-shutdown/`mkfs`/fork-bomb word screens only see text the
+  shell executes, so quoted arguments and heredoc data mentioning `halt` or
+  `reboot` are no longer refused, while `bash -c`, shell heredocs, pipes into a
+  shell, evaluators (`watch`/`tmux`/…) and `systemctl` shutdown units still are.
+  `DROP TABLE` keeps screening the whole text.
 - Surface finalize-gate bypasses on the final turn: an answer delivered despite
   open task-board items now carries an unfinished-work note and a
   `finalize_gate_bypassed` marker instead of reading as a clean success.

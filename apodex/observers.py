@@ -494,6 +494,16 @@ class TerminalObserver(BaseObserver):
             return self._skip_tool(
                 f"[blocked by safety policy: {risk.reason}]",
             )
+        if risk.must_ask and getattr(self.approver, "auto_approve", False):
+            # Auto-approve covers routine calls, not the ones the shared bash
+            # policy refuses everywhere else. Blocking (rather than silently
+            # prompting) keeps an unattended ``-y`` run from hanging.
+            self.r.note(f"✗ blocked: {risk.reason} (needs explicit approval)")
+            return self._skip_tool(
+                f"[blocked: {risk.reason} This needs explicit per-call approval, "
+                "which auto-approve does not give. Ask the user to run it "
+                "themselves or to turn auto-approve off.]",
+            )
         if risk.level != RISK_SAFE:  # confirm: ask the human
             decision = await self.approver.confirm(
                 name, risk.target, risk.reason, dangerous=risk.danger,

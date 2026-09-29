@@ -1528,3 +1528,50 @@ def test_download_file_target_is_the_resolved_destination(monkeypatch, tmp_path)
     assert named.startswith(str(tmp_path / "downloads" / "p.pdf"))
     assert "/elsewhere/" not in named           # the requested directory is ignored
     assert "renamed" in named                   # collisions rename it
+
+
+# ── shared bash policy: always-denied groups go to the human, never auto ─────
+
+
+@pytest.mark.parametrize("cmd", ["sudo systemctl restart x", "ssh host uptime", "pkill -f node"])
+def test_group_denied_bash_is_a_must_ask_confirm(tmp_path, cmd):
+    from apodex.agent_tools import RISK_CONFIRM, assess_tool_risk, assess_with_rules
+    from apodex.permissions import PermissionStore
+    cwd = str(tmp_path)
+    risk = assess_tool_risk("bash", {"command": cmd}, cwd)
+    assert risk.level == RISK_CONFIRM and risk.must_ask and risk.danger
+    # Neither auto_for_me nor a saved allow rule may answer it.
+    prefix = cmd.split()[0]
+    for kwargs in ({"auto_for_me": True}, {"rules": PermissionStore(allow={f"Bash({prefix})"})}):
+        assert assess_with_rules("bash", {"command": cmd}, cwd, **kwargs).level == RISK_CONFIRM
+
+
+def test_group_denied_bash_asks_the_human_with_typed_confirmation(tmp_path):
+    from apodex.observers import Decision, TerminalObserver
+
+    seen = {}
+
+    class _Human:
+        auto_approve = False
+        async def confirm(self, name, target, reason, **kw):
+            seen.update(kw)
+            return Decision(True)
+
+    obs = TerminalObserver(Renderer(theme="mono"), _Human(), str(tmp_path))
+    iv = asyncio.run(obs.on_tool_call(_turn_ctx(), {"name": "bash", "args": {"command": "sudo id"}}))
+    assert iv is None  # approved → runs
+    assert "Privilege escalation" in seen["dangerous"]
+
+
+def test_auto_approve_does_not_cover_group_denied_bash(tmp_path):
+    from apodex.observers import Approver, TerminalObserver
+
+    obs = TerminalObserver(Renderer(theme="mono"), Approver(auto_approve=True), str(tmp_path))
+    iv = asyncio.run(obs.on_tool_call(_turn_ctx(), {"name": "bash", "args": {"command": "sudo id"}}))
+    assert iv is not None and iv.skip_with_result
+    assert "auto-approve" in iv.skip_with_result
+
+
+def test_hard_denylist_still_blocks_under_the_human_gate(tmp_path):
+    from apodex.agent_tools import RISK_DENY, assess_tool_risk
+    assert assess_tool_risk("bash", {"command": "sudo rm -rf /"}, str(tmp_path)).level == RISK_DENY
