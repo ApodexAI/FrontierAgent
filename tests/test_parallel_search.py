@@ -137,6 +137,23 @@ async def test_parallel_mcp_rejects_filters_it_cannot_honor() -> None:
 
 
 @pytest.mark.asyncio
+async def test_parallel_mcp_rejects_counts_above_anonymous_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _FakeClient.calls = []
+    monkeypatch.setattr(parallel.httpx, "AsyncClient", _FakeClient)
+
+    result = await parallel.parallel_search_batch(
+        ["current information"], num_results=11,
+    )
+
+    assert isinstance(result, str)
+    assert "up to 10 results per query" in result
+    assert "Select Serper" in result
+    assert _FakeClient.calls == []
+
+
+@pytest.mark.asyncio
 async def test_original_parallel_route_keeps_its_domain_exclusions(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

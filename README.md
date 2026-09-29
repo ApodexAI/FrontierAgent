@@ -159,7 +159,8 @@ Set `WEB_SEARCH_PROVIDER=parallel` to use the free, keyless
 [Parallel Search MCP](https://docs.parallel.ai/integrations/mcp/search-mcp) for
 `web_search`. Serper remains the default, so existing keys and missing-key
 errors keep their current behavior. Parallel MCP does not support the tool's
-custom region, language, or time filters; choose Serper when those are needed.
+custom region, language, or time filters, or counts above 10 per query; choose
+Serper when those are needed.
 `web_fetch` continues to use its existing fetch provider.
 
 Start the TUI:

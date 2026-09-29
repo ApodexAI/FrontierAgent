@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 _MCP_URL = "https://search.parallel.ai/mcp"
 _INITIAL_PROTOCOL_VERSION = "2025-03-26"
+_ANONYMOUS_MAX_RESULTS = 10
 _PROVIDER_NAMES = frozenset({"serper", "parallel"})
 
 
@@ -197,13 +198,20 @@ async def parallel_search_batch(
     """Discover and call Parallel's native MCP search tool for each query.
 
     Locale and time controls are rejected when requested because the anonymous
-    MCP tool does not expose them. The selected provider never falls back to
-    Serper on a transport, rate-limit, or tool error.
+    MCP tool does not expose them. Anonymous search uses the server's default
+    limit of ten results per query; larger counts are rejected because this
+    tool has no per-call result-count argument. The selected provider never
+    falls back to Serper on a transport, rate-limit, or tool error.
     """
     if gl != "us" or hl != "en" or tbs:
         return (
             "Parallel Search MCP does not support custom region, language, or "
             "time filters. Select Serper to use those search options."
+        )
+    if int(num_results) > _ANONYMOUS_MAX_RESULTS:
+        return (
+            "Parallel Search MCP supports up to 10 results per query. "
+            "Select Serper for larger result counts."
         )
     if not queries:
         return []
@@ -303,7 +311,7 @@ async def parallel_search_batch(
                     raise ValueError("web_search returned an error")
                 normalised = _normalise_result(tool_result)
                 normalised["organic"] = (normalised.get("organic") or [])[:
-                    max(1, min(int(num_results), 100))
+                    max(1, int(num_results))
                 ]
                 results.append(normalised)
                 record_api_request("parallel")

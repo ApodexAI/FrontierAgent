@@ -71,8 +71,9 @@ chmod 600 "$config_dir/env"
 
 Optional web tools take `SERPER_API_KEY` and `JINA_API_KEY` in the same file.
 Add `WEB_SEARCH_PROVIDER=parallel` to this file to use the keyless Parallel
-Search MCP for `web_search`; Serper remains the default. Exporting the setting
-also works for native runs. `web_fetch` keeps its existing provider.
+Search MCP for `web_search`; it supports up to 10 results per query. Serper
+remains the default. Exporting the setting also works for native runs.
+`web_fetch` keeps its existing provider.
 `APODEX_ENV_FILE=/path/to/file` points the CLI at a different file.
 
 Rules for the file:
