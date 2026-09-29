@@ -35,6 +35,9 @@ services:
       APODEX_HOST_GID: ${APODEX_HOST_GID:-}
     volumes:
       - .:/project
+      # The harness receives .env through env_file above. Hide the on-disk
+      # copy from model commands, whose host-mapped UID can read /project.
+      - /dev/null:/project/.env:ro
       - ./.apodex/runs:/apodex-runs
       - frontier-agent-inputs:/apodex-inputs
       - frontier-agent-inputs:/inputs:ro
