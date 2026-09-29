@@ -62,6 +62,9 @@ Initial open-source release of FrontierAgent.
 
 ### Fixed
 
+- Surface finalize-gate bypasses on the final turn: an answer delivered despite
+  open task-board items now carries an unfinished-work note and a
+  `finalize_gate_bypassed` marker instead of reading as a clean success.
 - Native mode puts the CLI's own Python environment ahead of the inherited
   `PATH`, so `read_file`, `download_file`, and `python3` inside `bash` use the
   interpreter the CLI was installed with rather than a system Python.
