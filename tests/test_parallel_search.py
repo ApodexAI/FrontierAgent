@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import importlib
 import json
 from types import SimpleNamespace
@@ -154,6 +155,49 @@ async def test_parallel_mcp_rejects_counts_above_anonymous_default(
 
 
 @pytest.mark.asyncio
+async def test_parallel_mcp_dispatches_list_queries_concurrently(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    active = 0
+    peak_active = 0
+
+    class ConcurrentClient(_FakeClient):
+        async def post(
+            self,
+            url: str,
+            *,
+            json: dict[str, Any],
+            headers: dict[str, str],
+        ) -> _Response:
+            nonlocal active, peak_active
+            if json.get("method") == "tools/call":
+                active += 1
+                peak_active = max(peak_active, active)
+                await asyncio.sleep(0.02)
+                active -= 1
+            return await super().post(url, json=json, headers=headers)
+
+    _FakeClient.calls = []
+    monkeypatch.setattr(parallel.httpx, "AsyncClient", ConcurrentClient)
+
+    result = await parallel.parallel_search_batch(
+        ["first query", "second query"], num_results=3,
+    )
+
+    assert isinstance(result, list)
+    assert len(result) == 2
+    assert peak_active == 2
+    calls = [
+        payload for _, payload, _ in _FakeClient.calls
+        if payload and payload.get("method") == "tools/call"
+    ]
+    assert len({payload["id"] for payload in calls}) == 2
+    assert {
+        payload["params"]["arguments"]["objective"] for payload in calls
+    } == {"first query", "second query"}
+
+
+@pytest.mark.asyncio
 async def test_original_parallel_route_keeps_its_domain_exclusions(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -172,6 +216,40 @@ async def test_original_parallel_route_keeps_its_domain_exclusions(
 
     assert "Useful page" in output
     assert "youtube.com" not in output
+
+
+@pytest.mark.asyncio
+async def test_aligned_parallel_route_keeps_results_from_each_query(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = importlib.import_module("plugins.tools.web_search_aligned")
+    monkeypatch.setenv("WEB_SEARCH_PROVIDER", "parallel")
+    requested_limits: list[int] = []
+
+    async def search(
+        queries: list[str], *, num_results: int, **_: Any,
+    ) -> list[dict[str, Any]]:
+        requested_limits.append(num_results)
+        return [
+            {"organic": [
+                {"title": f"{query} result {index}",
+                 "link": f"https://{query}{index}.example.com/page",
+                 "snippet": "Useful result."}
+                for index in range(1, 3)
+            ]}
+            for query in queries
+        ]
+
+    monkeypatch.setattr(module, "parallel_search_batch", search)
+    output = await module.web_search_aligned.ainvoke({
+        "q": ["first", "second"],
+        "num": 2,
+    })
+
+    assert requested_limits == [2]
+    assert output.count("URL: https://") == 4
+    assert "first result 1" in output
+    assert "second result 1" in output
 
 
 @pytest.mark.asyncio

@@ -313,10 +313,6 @@ async def web_search_aligned(
                 if link:
                     seen_urls.add(link)
                 merged.append(item)
-                if len(merged) >= result_limit:
-                    break
-            if len(merged) >= result_limit:
-                break
         if not merged:
             return "No search results found."
         return _format_results_plaintext(merged)

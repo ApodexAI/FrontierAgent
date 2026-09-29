@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -282,13 +283,12 @@ async def parallel_search_batch(
             if not any(item.get("name") == "web_search" for item in tools):
                 raise ValueError("web_search tool unavailable")
 
-            results: list[dict[str, Any]] = []
-            for query in queries:
+            async def call_search(query: str, call_id: int) -> dict[str, Any]:
                 called, _ = await _post(
                     client,
                     {
                         "jsonrpc": "2.0",
-                        "id": request_id,
+                        "id": call_id,
                         "method": "tools/call",
                         "params": {
                             "name": "web_search",
@@ -299,11 +299,10 @@ async def parallel_search_batch(
                             },
                         },
                     },
-                    request_id=request_id,
+                    request_id=call_id,
                     session_id=server_session_id,
                     protocol_version=protocol_version,
                 )
-                request_id += 1
                 if not called or called.get("error"):
                     raise ValueError("web_search call failed")
                 tool_result = called.get("result") or {}
@@ -313,8 +312,20 @@ async def parallel_search_batch(
                 normalised["organic"] = (normalised.get("organic") or [])[:
                     max(1, int(num_results))
                 ]
-                results.append(normalised)
                 record_api_request("parallel")
+                return normalised
+
+            tasks = [
+                asyncio.create_task(call_search(query, request_id + index))
+                for index, query in enumerate(queries)
+            ]
+            try:
+                results = await asyncio.gather(*tasks)
+            except BaseException:
+                for task in tasks:
+                    task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+                raise
             return results
     except httpx.HTTPStatusError as error:
         status = error.response.status_code
