@@ -109,6 +109,9 @@ from workflows.agent_team.observers.console import RichConsoleObserver
 from workflows.agent_team.observers.no_progress_guard import NoProgressGuard
 from workflows.agent_team.observers.planning_gate import PlanningGateObserver
 from workflows.agent_team.observers.unassigned_nudge import UnassignedAgentNudge
+from workflows.agent_team.observers.unknown_agent_guard import (
+    UnknownAgentAssignmentGuard,
+)
 from workflows.agent_team.prompts import (
     get_main_system_prompt,
     render_team_effort,
@@ -655,6 +658,12 @@ def _build_observers(
         LeakedToolCallRetryObserver(tool_names=tool_names),
         AutoFanInObserver(),
         UnassignedAgentNudge(),
+        # Real, added 2026-09-29: closes the recovery gap on assign_task's
+        # existing "Unknown agent" error -- see unknown_agent_guard.py for
+        # the full root-cause writeup (a qwen3:14b trial hit this exact,
+        # already-correct error and spiraled into unproductive reasoning
+        # instead of calling create_subagent, running out the clock).
+        UnknownAgentAssignmentGuard(),
         # Break the create/assign wind-down spin (repeated new sub-agents +
         # trivial tasks, never finalising) — force a synthesised answer.
         NoProgressGuard(),

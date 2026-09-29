@@ -175,7 +175,30 @@ class LLMFallbackChain:
         max_tokens: int | None = None,
         extra_headers: dict[str, str] | None = None,
         timeout: float | None = None,
+        tool_choice: str | None = None,
     ) -> LLMResponse:
+        # Real, added 2026-09-29: ``with_provider_stamp`` wraps every LLM
+        # client (even single-entry, no-real-fallback cases) in this chain
+        # purely for billing metadata. ``bind_tool_choice`` (``_bind.py``,
+        # 2026-09-28) forwards ``tool_choice`` through ``_BoundLLM`` to
+        # whatever client it wraps -- when that's this chain, the kwarg was
+        # silently absent from the signature entirely, raising ``TypeError:
+        # LLMFallbackChain.chat/stream() got an unexpected keyword argument
+        # 'tool_choice'`` and crashing the turn outright. Confirmed live:
+        # cut a real, otherwise-clean nemotron-cascade-2:30b agent_team run
+        # short right as it finished the actual task correctly.
+        #
+        # ``tool_choice`` is NOT part of the core ``LLMClient`` protocol
+        # (core/llm.py) -- only ``OpenAIClient`` implements it, matching
+        # ``bind_tool_choice``'s own gating note that callers must restrict
+        # this to models confirmed to support it. So it's forwarded only
+        # when actually set, never unconditionally like ``tools``/
+        # ``temperature`` -- an Anthropic or other non-OpenAI leg's
+        # chat()/stream() has no such parameter and would raise the exact
+        # same TypeError if handed one it never asked for.
+        extra_kw: dict[str, Any] = (
+            {"tool_choice": tool_choice} if tool_choice is not None else {}
+        )
         last_exc: BaseException | None = None
         for idx, entry in enumerate(self.entries):
             try:
@@ -186,6 +209,7 @@ class LLMFallbackChain:
                     max_tokens=max_tokens,
                     extra_headers=extra_headers,
                     timeout=timeout,
+                    **extra_kw,
                 )
                 _stamp_metadata(result, idx, entry.model, entry.provider)
                 return result
@@ -209,7 +233,13 @@ class LLMFallbackChain:
         max_tokens: int | None = None,
         extra_headers: dict[str, str] | None = None,
         timeout: float | None = None,
+        tool_choice: str | None = None,
     ) -> AsyncIterator[StreamDelta]:
+        # See the matching note in ``chat()`` above -- ``tool_choice`` is
+        # forwarded only when set, never unconditionally.
+        extra_kw: dict[str, Any] = (
+            {"tool_choice": tool_choice} if tool_choice is not None else {}
+        )
         # Try entries in order. We can only fail over BEFORE any chunk
         # has been forwarded to the caller — once we yield, the consumer
         # has committed to that entry.
@@ -224,6 +254,7 @@ class LLMFallbackChain:
                     max_tokens=max_tokens,
                     extra_headers=extra_headers,
                     timeout=timeout,
+                    **extra_kw,
                 ):
                     # ``StreamDelta`` has no ``response_metadata`` channel, but
                     # it does carry a ``provider`` slot: stamp the serving leg's
