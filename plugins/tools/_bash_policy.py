@@ -2053,9 +2053,13 @@ def _env_split_payloads(tokens: list[str]) -> list[str]:
     like a single argument and the real command was never assessed. The
     payload is returned with the remaining words appended, as env does.
     """
-    out: list[str] = []
+    if _is_command_lookup(tokens):
+        return []
     for k, tok in enumerate(tokens):
-        if _basename(tok) != "env":
+        # Only an env in command position can run its split string. A word in
+        # ``echo env -S 'sudo id'`` is data, and words after an earlier -S are
+        # arguments to the command that env starts.
+        if _basename(tok) != "env" or _resolve_exe(tokens[:k])[0] is not None:
             continue
         i = k + 1
         while i < len(tokens):
@@ -2076,12 +2080,33 @@ def _env_split_payloads(tokens: list[str]) -> list[str]:
                 else:
                     break
             if payload is not None:
-                out.append(" ".join([payload, *(shlex.quote(w) for w in tokens[i:])]))
-                break
+                return [" ".join([payload, *(shlex.quote(w) for w in tokens[i:])])]
             if t == "--" or not t.startswith("-"):
                 break
             i += 2 if t in _WRAPPER_OPTION_VALUES["env"] else 1
-    return out
+    return []
+
+
+def _dynamic_env_split_reason(commands: list[list[str]]) -> str | None:
+    """Refuse env -S when expansion determines the executable it will start.
+
+    env expands ``${VAR}`` inside its split string after the shell has passed
+    the argument to it. Without the resulting value, Layer 1.5 cannot tell
+    whether that executable belongs to an always-denied group.
+    """
+    for argv in commands:
+        for payload in _env_split_payloads(argv):
+            try:
+                words = tokenize_shell_segment(payload)
+            except ValueError:
+                return "Cannot safely inspect the executable in `env -S`."
+            exe, _ = _resolve_exe(["env", *words])
+            if exe is not None and _is_dynamic_name(exe):
+                return (
+                    "Refuses `env -S` with a dynamically generated executable "
+                    "name; use a fixed command name instead."
+                )
+    return None
 
 
 def _unknown_evaluator_words(argv: list[str]) -> list[str]:
@@ -2385,6 +2410,10 @@ def assess_bash_command(
         argv_reason = _argv_hard_deny(commands)
         if argv_reason:
             return BashCommandAssessment(level="deny", reason=argv_reason)
+
+        env_reason = _dynamic_env_split_reason(commands)
+        if env_reason:
+            return BashCommandAssessment(level="deny", reason=env_reason)
 
         # ── Layer 1.5: always-denied groups (every mode) ──
         group_hit = _argv_group_deny(commands)

@@ -498,3 +498,27 @@ def test_runner_payloads_reach_the_word_screens(command: str, mode: str) -> None
 ])
 def test_benign_runner_and_ansi_c_forms_stay_allowed(command: str) -> None:
     assert assess_bash_command(command, mode="off").level == "allow"
+
+
+@pytest.mark.parametrize("mode", MODES)
+@pytest.mark.parametrize("command", [
+    "X=su env -S '${X}do id'",
+    "env X=su env --split-string='${X}do id'",
+    "X=su env -S '-i ${X}do id'",
+])
+def test_env_split_dynamic_executable_is_denied(command: str, mode: str) -> None:
+    # env expands ${X} after the shell has passed it the split string. The
+    # policy cannot know the executable name from the literal argument.
+    assert assess_bash_command(command, mode=mode).level == "deny"
+    assert assess_bash_command(command, mode=mode, interactive=True).level == "deny"
+
+
+@pytest.mark.parametrize("command", [
+    "echo env -S 'sudo id'",
+    "printf '%s\\n' env -S 'sudo id'",
+    "command -v env -S 'sudo id'",
+    "env -S 'echo' env -S 'sudo id'",
+    "env -S 'echo ${HOME}'",
+])
+def test_env_split_only_checks_the_command_it_runs(command: str) -> None:
+    assert assess_bash_command(command, mode="off").level == "allow"
