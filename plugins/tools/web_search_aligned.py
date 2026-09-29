@@ -24,6 +24,11 @@ from tenacity import (
 
 from frontier_agent.core.tool import tool
 from frontier_agent.infra.usage_meter import record_api_request
+from plugins.tools._parallel_search import (
+    parallel_search_batch,
+    selected_search_provider,
+    valid_search_provider,
+)
 from plugins.tools.web_search import is_snippet_blocked_result
 
 logger = logging.getLogger(__name__)
@@ -269,9 +274,6 @@ async def web_search_aligned(
     Returns:
         Numbered plain-text list of search results, each with Title, Snippet, and URL
     """
-    if not _serper_api_key():
-        return "[ERROR]: SERPER_API_KEY environment variable not set."
-
     # The reference tool accepts ``Union[str, List[str]]`` and tolerates JSON-encoded
     # lists. We mirror both shapes so any prompt that worked there works here.
     q = _ensure_list(q)
@@ -279,6 +281,48 @@ async def web_search_aligned(
     queries = [qry for qry in queries if qry and qry.strip()]
     if not queries:
         return "[ERROR]: Search query 'q' is required and cannot be empty."
+
+    provider = selected_search_provider()
+    if not valid_search_provider(provider):
+        return "[ERROR]: WEB_SEARCH_PROVIDER must be 'serper' or 'parallel'."
+    if provider == "parallel":
+        if location is not None or page not in (None, 1) or autocorrect is not None:
+            return (
+                "[ERROR]: Parallel Search MCP does not support location, page, or "
+                "autocorrect options. Select Serper to use those search options."
+            )
+        result_limit = 10 if num is None else max(1, min(num, 100))
+        datas = await parallel_search_batch(
+            queries,
+            num_results=result_limit,
+            gl=gl,
+            hl=hl,
+            tbs=tbs or "",
+        )
+        if isinstance(datas, str):
+            return f"[ERROR]: {datas}"
+        merged: list[dict] = []
+        seen_urls: set[str] = set()
+        for data in datas:
+            for item in data.get("organic", []):
+                link = item.get("link", "")
+                if _is_banned_url(link) or is_snippet_blocked_result(item):
+                    continue
+                if link and link in seen_urls:
+                    continue
+                if link:
+                    seen_urls.add(link)
+                merged.append(item)
+                if len(merged) >= result_limit:
+                    break
+            if len(merged) >= result_limit:
+                break
+        if not merged:
+            return "No search results found."
+        return _format_results_plaintext(merged)
+
+    if not _serper_api_key():
+        return "[ERROR]: SERPER_API_KEY environment variable not set."
 
     try:
         all_organic: list[list[dict]] = await asyncio.gather(

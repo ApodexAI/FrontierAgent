@@ -324,6 +324,7 @@ def test_resolution_never_carries_a_value(launch, user_file) -> None:
 def test_forwarded_names_are_names_only_and_only_when_set(launch, user_file, monkeypatch) -> None:
     _write(user_file, f"OPENAI_API_KEY={_SECRET}\nCUSTOM_PROVIDER_TOKEN=abc\n")
     monkeypatch.setenv("SERPER_API_KEY", "serper-secret")
+    monkeypatch.setenv("WEB_SEARCH_PROVIDER", "parallel")
     monkeypatch.delenv("JINA_API_KEY", raising=False)
 
     resolution = load_environment()
@@ -332,6 +333,7 @@ def test_forwarded_names_are_names_only_and_only_when_set(launch, user_file, mon
     assert "OPENAI_API_KEY" in names  # from the file
     assert "CUSTOM_PROVIDER_TOKEN" in names  # file-defined, even if unlisted
     assert "SERPER_API_KEY" in names  # well-known and exported
+    assert "WEB_SEARCH_PROVIDER" in names
     assert "JINA_API_KEY" not in names  # well-known but not set
     assert _SECRET not in " ".join(names)
 

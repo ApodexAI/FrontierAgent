@@ -14,6 +14,11 @@ from frontier_agent.core.tool import tool
 from frontier_agent.infra.config import get_config
 from frontier_agent.infra.usage_meter import record_api_request
 from plugins.tools._coerce import coerce_json_list
+from plugins.tools._parallel_search import (
+    parallel_search_batch,
+    selected_search_provider,
+    valid_search_provider,
+)
 from plugins.tools._single_flight import SingleFlightCoalescer
 
 logger = logging.getLogger(__name__)
@@ -457,6 +462,31 @@ async def web_search(
 
     from plugins.tools._overflow import maybe_overflow
 
+    provider = selected_search_provider()
+    if not valid_search_provider(provider):
+        return "Error: WEB_SEARCH_PROVIDER must be 'serper' or 'parallel'."
+    if provider == "parallel":
+        datas = await parallel_search_batch(
+            queries,
+            num_results=num_results,
+            gl=gl,
+            hl=hl,
+            tbs=tbs,
+        )
+        if isinstance(datas, str):
+            return f"Error: {datas}"
+        if not datas:
+            return f"No results found for: {queries[0]}"
+        if len(datas) == 1:
+            return maybe_overflow(
+                "web_search",
+                _format_results(datas[0], max_organic=num_results),
+            )
+        return maybe_overflow(
+            "web_search",
+            _format_parallel_query_results(queries, datas, num_results),
+        )
+
     if len(queries) == 1:
         data = await raw_web_search(queries[0], num_results, gl, hl, tbs)
         if not data:
@@ -467,6 +497,26 @@ async def web_search(
         "web_search",
         await _run_parallel_queries(queries, num_results, gl, hl, tbs),
     )
+
+
+def _format_parallel_query_results(
+    queries: list[str], datas: list[dict], max_results: int,
+) -> str:
+    """Keep the canonical query-labelled output for Parallel MCP batches."""
+    seen_urls: set[str] = set()
+    blocks: list[str] = []
+    for query, data in zip(queries, datas, strict=False):
+        if not data:
+            blocks.append(f"## Query: {query}\n\nNo results (error or empty).")
+            continue
+        organic = _dedupe_display_organic(
+            data.get("organic") or [], seen_urls, max_results,
+        )
+        blocks.append(
+            f"## Query: {query}\n\n"
+            f"{_format_results({**data, 'organic': organic}, max_organic=max_results)}"
+        )
+    return "\n\n---\n\n".join(blocks)
 
 
 def _normalise_queries(query: str | list[str]) -> list[str]:
