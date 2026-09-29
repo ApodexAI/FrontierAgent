@@ -9,7 +9,7 @@ from plugins.tools.assign_task import assign_task
 from plugins.tools.bash import bash
 from plugins.tools.collect_reports import collect_reports
 from plugins.tools.create_file import create_file
-from plugins.tools.create_subagent import create_subagent
+from plugins.tools.create_subagent import create_subagent, spawn_agent
 from plugins.tools.download_file import download_file
 from plugins.tools.file_editor import (
     file_editor_create,
@@ -37,6 +37,7 @@ _BUILTIN_TOOLS: list[Tool] = [
     download_file,
     bash,
     create_subagent,
+    spawn_agent,
     assign_task,
     add_task,
     update_task,

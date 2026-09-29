@@ -114,10 +114,18 @@ def _status_notice(
             body = (
                 f"This is consecutive '{state}' notice #{count}. STOP "
                 "calling collect_reports — repeating it cannot return "
-                "anything new. Call finalize_answer NOW with your best "
-                "synthesis of the reports already collected, or "
-                "assign_task with a concrete follow-up question if (and "
-                "only if) one is genuinely needed."
+                # Real, fixed 2026-09-05: this coordinator's own real
+                # finishing mechanism is a bare-text turn with no tool call
+                # (BareTextFinalizeObserver) -- there is NO real
+                # `finalize_answer` tool available to it (that tool exists
+                # elsewhere, for sub-agents/other workflows only). The
+                # original text here told multiple, real, different models
+                # to call a tool that does not exist in this context,
+                # directly causing the repeated, confirmed hallucination.
+                "anything new. End your turn now with a plain-text answer "
+                "(no tool call) synthesizing the reports already collected, "
+                "or call assign_task with a concrete follow-up question if "
+                "(and only if) one is genuinely needed."
             )
     else:
         _reset_status_churn(scope)

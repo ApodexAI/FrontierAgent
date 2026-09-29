@@ -115,7 +115,7 @@ _READ_ONLY = frozenset({
     # Task board & planning built-ins
     "add_task", "update_task", "finish_planning",
     # Subagent & report workflow built-ins
-    "create_subagent", "assign_task", "collect_reports", "stop_subagent",
+    "create_subagent", "spawn_agent", "assign_task", "collect_reports", "stop_subagent",
     "submit_report", "finalize_answer",
 })
 # Tools that mutate the working tree — always confirmed (unless auto-approve)

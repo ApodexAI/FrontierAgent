@@ -146,7 +146,21 @@ class AssignmentSpec(BaseModel):
         ),
         min_length=1,
     )
-    prompt: StrictStr = Field(
+    # Real, renamed 2026-09-05: was `prompt`. Confirmed empirically that
+    # when this tool and create_subagent (agents[].system_prompt) are
+    # both offered to a model together, several different real models
+    # independently collapsed create_subagent's own, correct
+    # `system_prompt` field into this tool's shorter, more generic
+    # `prompt` field -- a real, confirmed cross-tool field-name
+    # interference bug, not a schema defect in either tool alone (a
+    # controlled, isolated test offering only create_subagent produced
+    # a perfect, correct call every time; adding this tool back in
+    # caused the same collapse to recur). Full-scope check done first:
+    # this field is entirely self-contained to this one file, no
+    # aliasing, no validators tied to the name, no external references
+    # anywhere else in the real codebase, and the one real internal
+    # access site already locally renamed to `task_prompt` regardless.
+    task_prompt: StrictStr = Field(
         description="Concrete task prompt for that sub-agent.",
         min_length=1,
     )
@@ -500,7 +514,7 @@ async def assign_task(tasks: list[AssignmentSpec] | str = "") -> str:
         agent_name = _normalize_agent_name(
             spec.agent.strip(), task_types,
         )
-        task_prompt = spec.prompt.strip()
+        task_prompt = spec.task_prompt.strip()
         if not agent_name:
             errors.append("Skipping task with no 'agent' field")
             continue

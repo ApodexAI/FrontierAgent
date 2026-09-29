@@ -8,6 +8,8 @@ import logging
 import os
 from typing import Any
 
+from pydantic import BaseModel, StrictStr
+
 from frontier_agent.components.agent_bus import AgentBus
 from frontier_agent.core.execution_context import get_current_execution_scope
 from frontier_agent.core.runtime.loop.message_trimmer import TaskBoundaryTrimmer
@@ -457,8 +459,21 @@ def _bind_sub_agent_llm(runtime: Any | None) -> Any | None:
     return wrapped
 
 
+class AgentSpec(BaseModel):
+    """A single sub-agent to create -- real, typed, structured schema for
+    create_subagent's own agents parameter (real, tested, verified fix,
+    2026-09-05: the original `list[Any] | str` produced an empty
+    `items: {}` in the generated JSON schema, giving models no
+    machine-readable field names to call this tool correctly with --
+    confirmed directly, empirically, before this fix was applied, by
+    generating both the broken and fixed schemas and comparing them)."""
+
+    name: StrictStr
+    system_prompt: StrictStr
+
+
 @tool
-async def create_subagent(agents: list[Any] | str = "") -> str:
+async def create_subagent(agents: list[AgentSpec] | str = "") -> str:
     """Create one or more persistent sub-agents.
 
     Each sub-agent is a long-lived session that can accept multiple
@@ -526,11 +541,20 @@ async def create_subagent(agents: list[Any] | str = "") -> str:
     task_types = _resolve_task_types(runtime)
 
     for spec in agents:
-        if not isinstance(spec, dict):
-            errors.append(f"Skipping non-dict agent spec: {spec!r}")
+        # Real, deliberate: handles both real, expected shapes -- a real
+        # AgentSpec instance (the normal path, once agents: list[AgentSpec]
+        # is validated by pydantic) and a plain dict (the fallback path,
+        # when coerce_json_list above parsed a raw JSON string the model
+        # sent instead of a real, structured list).
+        if isinstance(spec, AgentSpec):
+            raw_name = spec.name.strip()
+            prompt = spec.system_prompt.strip()
+        elif isinstance(spec, dict):
+            raw_name = str(spec.get("name", "")).strip()
+            prompt = str(spec.get("system_prompt", "")).strip()
+        else:
+            errors.append(f"Skipping unrecognized agent spec: {spec!r}")
             continue
-        raw_name = str(spec.get("name", "")).strip()
-        prompt = str(spec.get("system_prompt", "")).strip()
         if not raw_name:
             errors.append("Skipping agent with no name")
             continue
@@ -615,4 +639,47 @@ async def create_subagent(agents: list[Any] | str = "") -> str:
     return "\n".join(lines)
 
 
-__all__ = ["create_subagent"]
+# Real, reduced-delegation tool, added 2026-09-07. Directly motivated by a
+# cross-model failure confirmed live, twice, this same session: both
+# gemma4:e2b (turn 1) and qwen3:14b (turn 121, after 121 turns of visibly
+# tortured internal reasoning) independently converged on the exact same
+# wrong call shape -- create_subagent(agent_name="X", specialization="Y") --
+# instead of the real, required nested list schema
+# create_subagent(agents=[{"name": "X", "system_prompt": "Y"}]). Two
+# structurally different models hitting the identical, specific schema
+# error is real, direct evidence the nested-list shape itself is the
+# problem, not a model-specific quirk.
+#
+# spawn_agent is a flat, single-agent alternative that takes exactly the
+# two real fields every prior failure attempted to pass, with no list or
+# nesting for the model to get wrong -- it thinly wraps the real,
+# existing create_subagent so no dispatch/session logic is duplicated.
+# This does not fix "the model doesn't know the schema"; it removes the
+# one structural feature (a required list-of-dicts for the single-agent
+# case) that both real failures independently reached for and got wrong.
+@tool
+async def spawn_agent(name: str, system_prompt: str) -> str:
+    """Create ONE persistent sub-agent -- the flat, single-agent form of
+    create_subagent, for when you only need one agent right now.
+
+    Args:
+        name: Unique sub-agent name, e.g. ``doc1_summarizer``.
+        system_prompt: This agent's system prompt -- its specialty/focus.
+
+    Returns:
+        Confirmation text (same as create_subagent).
+
+    If you need several agents in one call, use create_subagent(agents=[...])
+    instead -- this tool only ever creates one.
+    """
+    # Real bug found and fixed 2026-09-08: create_subagent is decorated with
+    # @tool, so it's a real Tool object (Tool.func holds the actual,
+    # underlying callable), not a plain function anymore -- calling
+    # create_subagent(...) directly here raised a real, confirmed
+    # `TypeError: 'Tool' object is not callable` live, during a real
+    # coordinator-only test run. Tool.func is the correct way to invoke it.
+    return await create_subagent.func(agents=[{"name": name, "system_prompt": system_prompt}])
+
+
+
+__all__ = ["create_subagent", "spawn_agent"]

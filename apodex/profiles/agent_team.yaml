@@ -2,7 +2,16 @@ name: agent_team
 description: "Native Agent Team workflow: coordinator delegates web-enabled work to sub-agents."
 
 workflow: agent_team
-workflow_profile: tui
+# Real, changed 2026-09-05: was `tui`. That profile's own planning_mode:
+# false setting was silently, completely disabling two real safeguards --
+# the planning-phase tool restriction, and finalize_gate's real
+# "did a sub-agent actually do work" verification -- confirmed directly,
+# empirically, that this let the coordinator mark real tasks "resolved"
+# via update_task with zero actual sub-agent delegation ever happening, in
+# real, live test runs across multiple different models. `strict`
+# (workflows/agent_team/profiles/strict.yaml) is otherwise identical to
+# `tui`, with planning_mode: true.
+workflow_profile: strict_single_agent
 
 llm:
   provider: ${OPENAI_PROVIDER:-openai}

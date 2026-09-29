@@ -20,6 +20,60 @@ from frontier_agent.core.tool import tool
 from plugins.tools._bus_scope import resolve_bus_task_id
 from plugins.tools._coerce import coerce_json_list, coerce_json_object
 
+VALID_RESOLUTION_SET = frozenset(VALID_RESOLUTION)
+
+# Real, added 2026-09-07: resolution-value normalization layer, closing a
+# real, recurring failure confirmed directly, live, this same session --
+# the model repeatedly used invalid resolution values ("reported",
+# "completed", "closed") despite (a) the tool's own docstring already
+# spelling out the four real, valid values explicitly, and (b) a clear,
+# explicit per-call error message telling it the exact valid enum every
+# single time it got one wrong. It never self-corrected across multiple
+# consecutive turns -- the same "doesn't reliably follow an explicit,
+# stated constraint" limitation observed elsewhere all session (the
+# planning-transition problem), just surfacing in a new place.
+#
+# This silently corrects common synonyms server-side instead of relying on
+# the model getting the literal string right -- removing the decision,
+# rather than just re-stating it more clearly (which, per tonight's own
+# evidence, does not reliably help). The specific invented words observed
+# live ("reported", "completed", "closed") match generic, real-world issue-
+# tracker vocabulary (GitHub Issues, Jira) rather than this project's
+# actual four-value schema -- a training-data prior likely overriding the
+# narrower, in-context instruction.
+_RESOLUTION_SYNONYMS: dict[str, str] = {
+    # -> resolved
+    "completed": "resolved", "complete": "resolved", "done": "resolved",
+    "finished": "resolved", "success": "resolved", "reported": "resolved",
+    "closed": "resolved", "solved": "resolved", "answered": "resolved",
+    # -> in_progress
+    "working": "in_progress", "ongoing": "in_progress",
+    "started": "in_progress", "active": "in_progress",
+    "inprogress": "in_progress", "in-progress": "in_progress",
+    # -> open
+    "new": "open", "created": "open", "opened": "open", "pending": "open",
+    "todo": "open", "not_started": "open",
+    # -> cancelled
+    "abandoned": "cancelled", "dropped": "cancelled", "canceled": "cancelled",
+    "cancelled_without_action": "cancelled", "closed_without_action": "cancelled",
+    "rejected": "cancelled", "blocked": "cancelled",
+}
+
+
+def _normalize_resolution(raw: str) -> tuple[str, bool]:
+    """Real, direct synonym correction. Returns (value, was_normalized).
+    Falls through unchanged (and un-normalized) for anything not in the
+    real, known map -- letting the existing, real error-message path in
+    update_task still catch genuinely unrecognized input rather than
+    silently guessing at it."""
+    if raw in VALID_RESOLUTION_SET:
+        return raw, False
+    mapped = _RESOLUTION_SYNONYMS.get(raw.lower().strip())
+    if mapped is not None:
+        return mapped, True
+    return raw, False
+
+
 logger = logging.getLogger(__name__)
 
 # task_id -> {"seq": int, "tasks": {id: {description, resolution, owners, group}}}
@@ -153,7 +207,7 @@ _PLANNING_ALLOWED = (
     "grep_search", "glob_search", "read_file", "read_text", "view_image",
     "web_search", "web_fetch",
     # board tools
-    "add_task", "update_task", "finish_planning",
+    "add_task", "update_task", "finish_planning", "define_plan",
 )
 
 
@@ -419,6 +473,13 @@ async def update_task(updates: list[Any]) -> str:
             errors.append(f"{tid or '?'}: no such task")
             continue
         res = str(u.get("resolution", "")).strip()
+        if res:
+            res, was_normalized = _normalize_resolution(res)
+            if was_normalized:
+                logger.info(
+                    "update_task(task=%s, id=%s): normalized resolution "
+                    "%r -> %r", scope.task_id, tid, u.get("resolution"), res,
+                )
         if res and res not in VALID_RESOLUTION:
             errors.append(f"{tid}: bad resolution {res!r} (use {VALID_RESOLUTION})")
             continue
@@ -449,6 +510,63 @@ async def update_task(updates: list[Any]) -> str:
     if errors:
         msg += "\nerrors: " + "; ".join(errors)
     return msg
+
+
+@tool
+async def define_plan(tasks: list[Any]) -> str:
+    """Define the FULL task plan in one call, and immediately move to
+    EXECUTION mode -- the single-call replacement for add_task + finish_planning.
+
+    Real, new tool added 2026-09-06, testing this session's own hypothesis
+    (from live, direct Bonsai-8B runs): collapsing "add tasks, then remember
+    to call a separate finish_planning" into one atomic action removes both
+    the sequencing burden (repeated add_task calls) and the transition
+    burden (a second tool name to recall) that a real, live coordinator run
+    got stuck on repeatedly this same session, even with the two-step
+    protocol stated explicitly in its own system prompt.
+
+    Call this ONCE, with the COMPLETE decomposition -- every real
+    sub-question the task needs, in one list. There is no separate
+    finish_planning after this: define_plan itself both registers every
+    task AND ends Planning Mode in the same call, exactly like calling
+    add_task then finish_planning back to back, but as one real action
+    instead of two.
+
+    Args:
+        tasks: a list, each item {"description": str}, one concrete work
+            item per entry, e.g. "Summarize doc1.txt" -- not a vague area.
+
+    Returns:
+        The assigned ids, the rendered board, and confirmation that
+        EXECUTION mode is now active.
+    """
+    scope = get_current_execution_scope()
+    if scope is None:
+        return "Error: define_plan can only be called inside an active run."
+
+    add_result = await add_task(tasks)
+    if add_result.startswith("Error:"):
+        # Real, honest pass-through: if nothing usable landed on the board,
+        # do NOT also transition to execution -- that would leave the model
+        # in execution mode with an empty, real task board, matching the
+        # same "no_work_queued" failure NoProgressGuard already exists to
+        # catch, just reached through a different real path.
+        return add_result
+
+    if board_size(scope.task_id) == 0:
+        return (
+            "Error: define_plan ran but the task board is still empty -- "
+            "re-call with each task as its own {\"description\": \"<one "
+            "concrete work item>\"}."
+        )
+
+    _PHASE[scope.task_id] = "execution"
+    _record_op(scope.task_id, "finish_planning")
+    return (
+        f"{add_result}\n\n"
+        "Planning complete — now in EXECUTION mode. You may create_subagent "
+        "/ assign_task to build and dispatch the team."
+    )
 
 
 @tool
@@ -488,6 +606,7 @@ __all__ = [
     "clear_board",
     "count_resolutions",
     "current_phase",
+    "define_plan",
     "drain_board_ops",
     "finish_planning",
     "force_finish_planning",
