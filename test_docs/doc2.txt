@@ -1,0 +1,11 @@
+Risk Management in Volatile Markets
+
+Effective risk management requires accepting that no single strategy works in
+all market conditions. Diversification across asset classes, position sizing
+based on conviction level, and maintaining cash reserves for opportunities are
+all real, practical techniques.
+
+A common mistake is over-concentration in a single thesis, even a well-reasoned
+one. Markets can remain irrational longer than a trader can remain solvent.
+Real discipline means having predefined exit criteria before entering a
+position, not deciding under pressure during a drawdown.

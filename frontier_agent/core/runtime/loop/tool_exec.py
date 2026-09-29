@@ -244,13 +244,29 @@ async def execute_tools(
             if len(result_str) > _result_cap():
                 result_str = _truncate_with_recovery(name, result_str)
             elapsed = int((time.monotonic() - start) * 1000)
+            # Real, added 2026-09-08: confirmed directly, live, this same
+            # session -- read_file (plugins/tools/read_file.py) catches
+            # its own internal exceptions and returns a plain, successful
+            # string (e.g. "[read_file error] FileNotFoundError: ...")
+            # rather than raising, so this generic wrapper's own
+            # except-block is_error=True paths (below) never trigger for
+            # it. This left every is_error-based observer built this
+            # session (ErrorRecoveryStreakFlag, ErrorPatternObserver)
+            # structurally unable to ever see a read_file failure, and
+            # left sub-agents without a clear error signal, driving real,
+            # observed repeated-retry behavior on invalid paths. This is
+            # a real, deliberately NARROW, known-prefix check (not a
+            # broad "starts with Error" heuristic) to avoid false-
+            # positiving on legitimate file content that happens to start
+            # with a similar-looking word.
+            is_error = result_str.startswith("[read_file error]")
             return ToolResult(
                 name=name,
                 args=args,
                 result=result_str,
                 duration_ms=elapsed,
                 tool_call_id=tool_call_id,
-                is_error=False,
+                is_error=is_error,
                 # If a report and a user message became ready in the same event
                 # loop tick, preserve the real report and still tell the loop
                 # to inject the already-claimed user message before its next

@@ -108,6 +108,14 @@ class TurnContext:
     leaked_reasoning: str = ""
     # Native content blocks retained for signed/encrypted replay.
     thinking_blocks: list = field(default_factory=list)
+    # Real, added 2026-09-08: the real, specific sub-agent session id
+    # (e.g. "task123.agent_team.doc1_summarizer"), NOT just the generic
+    # role_id (e.g. "agent_team_sub"). Confirmed directly, earlier this
+    # same session: observer hooks only receive TurnContext, which had
+    # no way to resolve the specific agent name -- only its generic
+    # role. Optional, defaulted field for real, full backward
+    # compatibility with every existing caller/observer.
+    session_id: str = ""
 
 
 @dataclass

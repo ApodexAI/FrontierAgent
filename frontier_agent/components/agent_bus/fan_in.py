@@ -53,6 +53,20 @@ INCOMPLETE_STOP_REASONS: frozenset[str] = frozenset({
     "context_limit_reached",
     "cross_turn_repetition",
     "repeated_tool_calls",
+    # Real, added 2026-09-08: a stable, short, alternating N-tool cycle
+    # (e.g. read_file/create_file/read_file/...) that RepetitionGuard's
+    # consecutive-identical-turn check cannot see, since no single turn
+    # repeats the immediately preceding one. Confirmed directly, live: a
+    # real sub-agent ran 35+ turns in exactly this pattern without ever
+    # tripping repeated_tool_calls.
+    "cycle_detected",
+    # Real, added 2026-09-08: many consecutive turns hammering the same
+    # real target (file path / URL) with a changing, non-identical
+    # argument shape each time (confirmed directly, live: a real
+    # sub-agent repeated create_file on the same path with a different
+    # edit-op structure turn to turn) -- distinct from cycle_detected,
+    # since no two turns' full argument bytes ever matched.
+    "argument_churn_detected",
     # The output cap cut every continuation off mid-sentence. Distinct from
     # ``no_tool``: the agent never chose to stop, so its report is unfinished
     # rather than merely answer-less.
@@ -84,6 +98,16 @@ _INCOMPLETE_NOTES: dict[str, str] = {
     "repeated_tool_calls": (
         "agent stopped after re-issuing the same tool call with identical "
         "arguments; report is a best-effort partial"
+    ),
+    "cycle_detected": (
+        "agent stopped after cycling through the same short sequence of "
+        "different tool calls repeatedly without progress; report is a "
+        "best-effort partial"
+    ),
+    "argument_churn_detected": (
+        "agent stopped after repeatedly calling the same tool on the same "
+        "target with varying arguments and no progress; report is a "
+        "best-effort partial"
     ),
     "exception": (
         "agent terminated with an unhandled exception; report is partial"

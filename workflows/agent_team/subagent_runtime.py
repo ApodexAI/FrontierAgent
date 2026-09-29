@@ -342,6 +342,7 @@ async def force_final_answer(
     task_description: str = "",
     structured_report: bool = False,
     language: str = "",
+    task_id: str = "",
 ) -> AgentLoopResult:
     """Run one tool-free LLM call to extract a plain-text final answer.
 
@@ -426,6 +427,72 @@ async def force_final_answer(
         "force_final_answer injected after %s (%d chars)",
         result.stopped_by, len(text),
     )
+    # Real, added 2026-09-08 (ForceFinalAnswerObserver): logging-only
+    # visibility into every real, genuine invocation of this rescue path.
+    # The logger.info() call above already existed but has been genuinely
+    # invisible all session -- confirmed directly, earlier, that this
+    # codebase never calls logging.basicConfig(). This print() makes the
+    # same real event actually visible for the first time, tracking
+    # exactly which rescue_mode fired and why -- distinct from the
+    # fabrication-specific check further below, which only inspects
+    # dismissive-language content; this logs EVERY rescue, regardless of
+    # content, giving a real, first frequency signal for how often this
+    # path is hit at all.
+    print(
+        f"[FORCE_FINAL_ANSWER_OBSERVER] task={task_id or '?'} "
+        f"stopped_by={result.stopped_by} rescue_mode={rescue_mode} "
+        f"text_chars={len(text)}",
+        flush=True,
+    )
+    # Real, added 2026-09-08: a real, distinct, non-overlapping signal
+    # from the print() directly above -- that one logs a single real
+    # event per invocation; this tracks the real, running DISTRIBUTION
+    # of rescue_mode values across every real invocation seen so far in
+    # this process, answering "which rescue path does this pipeline
+    # lean on most" rather than "what happened this one time".
+    from workflows.agent_team.observers.rescue_mode_distribution_tracker import (
+        record_and_report as _record_rescue_mode,
+    )
+    _record_rescue_mode(rescue_mode, task_id=task_id)
+    # Real, added 2026-09-08: closes a real, confirmed-live structural gap
+    # in FabricationFlag (workflows/agent_team/observers/fabrication_flag.py)
+    # -- that observer only hooks on_tool_call for submit_report, so a
+    # fabrication that reaches the user via THIS rescue path (the agent
+    # never called submit_report at all) was never inspected. Confirmed
+    # directly, live, this same session: a real sub-agent's rescued final
+    # answer here fabricated "no real or substantive content" about a file
+    # that genuinely contained substantive text -- and the observer never
+    # saw it. This is a real, self-contained, independent check (no shared
+    # state with the observer instance, since force_final_answer has no
+    # observer access at all) that scans this loop's own real messages for
+    # the longest real read_file result, then applies the same real,
+    # confirmed dismissive-language regex directly here.
+    try:
+        from workflows.agent_team.observers.fabrication_flag import (
+            _DISMISSIVE_RE, _MIN_REAL_FILE_CHARS,
+        )
+        longest_real_file = ""
+        for msg in result.messages:
+            if not isinstance(msg, dict) or not is_tool_msg(msg):
+                continue
+            if msg.get("name") != "read_file":
+                continue
+            body = text_of(msg.get("content"))
+            if len(body) > len(longest_real_file):
+                longest_real_file = body
+        if len(longest_real_file) >= _MIN_REAL_FILE_CHARS and _DISMISSIVE_RE.search(text):
+            print(
+                f"[FABRICATION_FLAG] task={task_id or '?'} "
+                f"source=force_final_answer_rescue -- rescued final answer "
+                f"claims the file is empty/uninformative/repetitive, but a "
+                f"REAL read_file result in this same loop was "
+                f"{len(longest_real_file)} genuinely substantive chars. "
+                f"Possible fabrication. Rescued text snippet: {text[:200]!r} "
+                f"| Real file snippet: {longest_real_file[:200]!r}",
+                flush=True,
+            )
+    except Exception as exc:
+        logger.warning("force_final_answer fabrication check failed: %s", exc)
     return result
 
 
@@ -901,6 +968,18 @@ def _swarm_observers(
     )
     from frontier_agent.components.observers.react_step_tracker import ReactStepTracker
     from frontier_agent.components.observers.repetition_guard import RepetitionGuard
+    from frontier_agent.components.observers.cycle_detection_guard import CycleDetectionGuard
+    from workflows.agent_team.observers.self_consistency_flag import SelfConsistencyFlag
+    from workflows.agent_team.observers.fabrication_flag import FabricationFlag
+    from workflows.agent_team.observers.multi_tool_oscillation_flag import MultiToolOscillationFlag
+    from workflows.agent_team.observers.partial_read_contamination_flag import PartialReadContaminationFlag
+    from workflows.agent_team.observers.tool_scaffolding_drift_flag import ToolScaffoldingDriftFlag
+    from workflows.agent_team.observers.context_anchor_shift_flag import ContextAnchorShiftFlag
+    from workflows.agent_team.observers.tool_call_dominance_flag import ToolCallDominanceFlag
+    from workflows.agent_team.observers.error_recovery_streak_flag import ErrorRecoveryStreakFlag
+    from workflows.agent_team.observers.error_pattern_observer import ErrorPatternObserver
+    from workflows.agent_team.observers.tool_starvation_flag import ToolStarvationFlag
+    from workflows.agent_team.observers.stopped_by_distribution_tracker import StoppedByDistributionObserver
     from frontier_agent.components.observers.sse_observer import SSEObserver
     from frontier_agent.components.observers.stop_signal_observer import StopSignalObserver
     from frontier_agent.components.observers.text_repetition_guard import (
@@ -934,6 +1013,96 @@ def _swarm_observers(
         # affordable for a sub-agent — the coordinator IS the run and gets a
         # hint at most.
         RepetitionGuard(stop_after=6),
+        # Real, added 2026-09-08: closes a real, confirmed-live gap in
+        # RepetitionGuard above -- a stable, short, alternating N-tool
+        # cycle (e.g. read_file/create_file/read_file/...) that never
+        # repeats on two CONSECUTIVE turns, so RepetitionGuard's exact
+        # match never fires. Confirmed directly, live: a real sub-agent
+        # ran 35+ turns in exactly this pattern before being manually
+        # killed. Hints at 3 repeats of a period-2..4 cycle, hard-stops
+        # at 6 repeats.
+        CycleDetectionGuard(max_period=4, min_repeats=3, stop_after_repeats=6),
+        # Real, added 2026-09-08: logging-only, no behavior change (per real,
+        # deliberate design). Flags when this agent's final submit_report
+        # uses dismissive/empty-content language while it earlier wrote real,
+        # substantive content of its own via create_file -- confirmed
+        # directly, live, this same session: doc2_summarizer correctly
+        # summarized a real file, then contradicted itself in its final
+        # report, claiming the file was "uninformative".
+        SelfConsistencyFlag(),
+        # Real, added 2026-09-08: a real, distinct check from
+        # SelfConsistencyFlag above -- this one compares the agent's final
+        # claim directly against the REAL, ground-truth file content
+        # (captured from read_file's own result), catching a fabrication
+        # even when the agent never produced any correct intermediate
+        # summary at all. Confirmed directly, offline, against the exact,
+        # real fabricated report observed live earlier this same session.
+        FabricationFlag(),
+        # Real, added 2026-09-08: a real, distinct signal from
+        # CycleDetectionGuard above -- that observer needs an EXACT,
+        # stable, repeating N-tool sequence; this one flags high DIVERSITY
+        # of different tool types used within a short window, regardless
+        # of exact repetition. Confirmed directly, offline, against a real
+        # pattern observed live earlier this same session.
+        MultiToolOscillationFlag(window=6, min_distinct=3),
+        # Real, added 2026-09-08: theoretical, NOT built from a confirmed
+        # case (unlike SelfConsistencyFlag/FabricationFlag) -- this is a
+        # plausible, untested hypothesis about a real drift mechanism.
+        # Tracks distinct (offset, max_chars) read_file variants per real
+        # file path; flags when 2+ appear.
+        PartialReadContaminationFlag(min_variants=2),
+        # Real, added 2026-09-08: theoretical, NOT built from a confirmed
+        # case -- nobody has measured scaffolding volume in the original
+        # doc2 fabrication trace. A plausible, untested hypothesis. Tracks
+        # cumulative tool-call argument bytes vs. real read_file content
+        # bytes; flags when the ratio crosses 5x.
+        ToolScaffoldingDriftFlag(ratio_threshold=5.0, min_scaffolding_bytes=2000),
+        # Real, added 2026-09-08: theoretical, NOT built from a confirmed
+        # case. Operationalizes the abstract concept of "topic anchor
+        # drift" as a concrete, measurable proxy: the real path/URL
+        # argument named in each tool call. Flags when the agent's tool
+        # calls shift to a different real target for several consecutive
+        # turns without a single call back to the original anchor.
+        ContextAnchorShiftFlag(shift_turns=4),
+        # Real, added 2026-09-08: a real, simplified extraction of one
+        # condition (dominance) from a larger, five-condition
+        # "ToolCallDistributionObserver" design proposed this session --
+        # deliberately scoped down. Tracks a real, sliding window of the
+        # last 8 tool calls; flags when one tool name accounts for 75%+
+        # of that window.
+        ToolCallDominanceFlag(window=8, dominance_threshold=0.75, min_calls=4),
+        # Real, added 2026-09-08: a real, deliberately simplified version
+        # of a much larger "RecoveryScaffoldingObserver" design proposed
+        # this session. Uses consecutive real tool-call errors
+        # (ToolResult.is_error) as a directly-observable proxy for
+        # "recovery loop" behavior, rather than trying to measure
+        # recovery-scaffolding byte volume, which has no clean signal in
+        # this pipeline's real tool-call data.
+        ErrorRecoveryStreakFlag(streak_threshold=3),
+        # Real, added 2026-09-08: a real, distinct signal from
+        # ErrorRecoveryStreakFlag above -- that observer only tracks
+        # CONSECUTIVE error streaks; this one categorizes every real
+        # error by (tool, error-message-prefix) across the WHOLE run,
+        # emitting a real summary once at the end, giving visibility
+        # into which tools fail and roughly why.
+        ErrorPatternObserver(min_errors_to_report=1),
+        # Real, added 2026-09-08: a real, deliberately simplified version
+        # of a much larger, five-condition "ToolStarvationObserver"
+        # design proposed this session. Only implements the single
+        # clearest condition: a sub-agent's entire run ends with zero
+        # real tool calls -- distinct from MultiToolOscillationFlag/
+        # ToolCallDominanceFlag, which both need at least some tool
+        # calls to have real data to work with.
+        ToolStarvationFlag(),
+        # Real, added 2026-09-08: the real, grounded, corrected version of
+        # a much larger "FallbackMechanismObserver" design proposed this
+        # session -- that design was built almost entirely on stopped_by
+        # values that do not exist in this codebase (confirmed directly
+        # against fan_in.py's real allowlist). This corrected version
+        # does one real, modest thing: tracks the running distribution of
+        # REAL stopped_by values across every sub-agent run this process,
+        # the direct complement to rescue_mode_distribution_tracker.
+        StoppedByDistributionObserver(),
         TextRepetitionGuard(enable_stop=True),
         ReactStepTracker(),
         EvidenceObserver(),
@@ -1199,6 +1368,7 @@ def build_swarm_session_runtime_spec(
             runtime.sub_agent_llm,
             timeout,
             task_description=_item.question,
+            task_id=task_id,
         )
 
     async def _adapter(

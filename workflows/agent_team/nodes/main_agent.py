@@ -108,6 +108,9 @@ from workflows.agent_team.observers.bare_text_finalize import (
 from workflows.agent_team.observers.console import RichConsoleObserver
 from workflows.agent_team.observers.no_progress_guard import NoProgressGuard
 from workflows.agent_team.observers.planning_gate import PlanningGateObserver
+from workflows.agent_team.observers.sub_agent_retry_gate import SubAgentRetryGate
+from workflows.agent_team.observers.task_board_truth_guard import TaskBoardTruthGuard
+from workflows.agent_team.observers.multi_agent_oscillation_flag import MultiAgentOscillationFlag
 from workflows.agent_team.observers.unassigned_nudge import UnassignedAgentNudge
 from workflows.agent_team.observers.unknown_agent_guard import (
     UnknownAgentAssignmentGuard,
@@ -652,10 +655,13 @@ def _build_observers(
     finalization_reserve_turns: int = 8,
     wall_deadline_s: float = 0,
     force_compaction_first: bool = False,
+    original_question: str = "",
 ) -> list[Any]:
     observers: list[Any] = [
         BareTextFinalizeObserver(),
-        LeakedToolCallRetryObserver(tool_names=tool_names),
+        LeakedToolCallRetryObserver(
+            tool_names=tool_names, original_question=original_question,
+        ),
         AutoFanInObserver(),
         UnassignedAgentNudge(),
         # Real, added 2026-09-29: closes the recovery gap on assign_task's
@@ -667,6 +673,27 @@ def _build_observers(
         # Break the create/assign wind-down spin (repeated new sub-agents +
         # trivial tasks, never finalising) — force a synthesised answer.
         NoProgressGuard(),
+        # Real, added 2026-09-06: bounds re-assignment to a sub-agent that
+        # keeps hitting its own no_tool retry cap on the SAME task. Confirmed
+        # directly, live, this same session: without this, the coordinator
+        # kept re-assigning an identically-failing sub-agent indefinitely,
+        # never breaking the cycle on its own.
+        SubAgentRetryGate(),
+        # Real, added 2026-09-08: makes the task board the single source of
+        # truth for what remains to be done. Confirmed directly, live, this
+        # same session: the real board itself behaved correctly (every item
+        # was genuinely marked resolved), but the coordinator kept
+        # re-dispatching the same, already-completed work anyway, eventually
+        # exhausting a real per-session dispatch limit and thrashing.
+        TaskBoardTruthGuard(),
+        # Real, added 2026-09-08: a real, deliberately simplified,
+        # coordinator-level counterpart to MultiToolOscillationFlag/
+        # CycleDetectionGuard (both sub-agent-level, this same session).
+        # Tracks the real sequence of assign_task target agent names;
+        # flags a stable, repeating A,B,A,B (or longer) cycle -- the
+        # coordinator ping-ponging between two sub-agents rather than
+        # making real forward progress.
+        MultiAgentOscillationFlag(max_period=3, min_repeats=2),
         # Hint-only: the coordinator IS the run, so a false positive must
         # never end it. Deliberately paired with NoProgressGuard rather than
         # with RepetitionGuard: waiting on running sub-agents means calling
@@ -1187,7 +1214,16 @@ async def main_agent_node(
     # context and run a FRESH execution loop (board injected into the new user
     # message, turns reset). Only meaningful when planning_mode is on.
     fresh_execution_context = bool(agent_cfg.get("fresh_execution_context", False))
-    planning_max_turns = int(agent_cfg.get("planning_max_turns", 40))
+    # Real, lowered 2026-09-19 default from 40 to 12: this is the real,
+    # actual value used in practice (the PlanningGateObserver constructor's
+    # own default is always overridden by this explicit pass-through --
+    # confirmed directly, an earlier edit there alone was verified
+    # ineffective). Same reasoning as the observer's own comment: a run
+    # that solves its task directly via a planning-only tool without ever
+    # calling add_task falls through to this turn-cap fallback (which has
+    # no empty-board restriction, by design) -- at 40 this meant up to 40
+    # turns of visible re-derivation before recovering.
+    planning_max_turns = int(agent_cfg.get("planning_max_turns", 12))
     date_str = datetime.now(UTC).date().isoformat()
 
     # Per-benchmark addendum (e.g. OfficeQA's official prompt with paths
@@ -1226,6 +1262,7 @@ async def main_agent_node(
         finalization_reserve_turns=finalization_reserve_turns,
         wall_deadline_s=wall_deadline_s,
         force_compaction_first=(context_compaction == "tiered" and max_len > 0),
+        original_question=question,
     )
     # A serve/CLI driver injects its own protocol-stream and worker-trace
     # observers via state.metadata["sdk_extra_observers"] (see
@@ -1244,7 +1281,21 @@ async def main_agent_node(
     # planning_max_turns. NOT needed on the two-loop path (the planning loop is
     # already tool-restricted + max_turns-capped) or when planning is off.
     if planning_mode and not fresh_execution_context:
-        observers.append(PlanningGateObserver(planning_max_turns=planning_max_turns))
+        # Guard-driven transition, made the real DEFAULT 2026-09-06 after
+        # direct, live Bonsai-8B testing this same session confirmed it
+        # produces a real, repeatable, correct full-protocol run -- while a
+        # competing fix (a single, simpler define_plan meta-tool) was
+        # verified NOT to work (never called once in 28 real turns). Kept
+        # as an env-var OPT-OUT (not opt-in) rather than removing the
+        # override entirely, as a real safety valve in case this default
+        # ever needs to be disabled for a specific, real deployment without
+        # a code change.
+        guard_driven = os.environ.get("FRONTIER_AGENT_GUARD_DRIVEN_TRANSITION", "1") == "1"
+        observers.append(PlanningGateObserver(
+            planning_max_turns=planning_max_turns,
+            guard_driven_transition=guard_driven,
+            original_question=question,
+        ))
 
     # WORKER_TRACE_DIR plumbing: SDK driver puts trace_dir + workflow_id
     # into state.metadata so sub-agents write per-session JSON files.
@@ -1476,7 +1527,9 @@ async def main_agent_node(
             getattr(t, "name", "") for t in planning_tools if getattr(t, "name", "")
         ]
         planning_observers: list[Any] = [
-            LeakedToolCallRetryObserver(tool_names=planning_tool_names),
+            LeakedToolCallRetryObserver(
+                tool_names=planning_tool_names, original_question=question,
+            ),
             build_task_board_observer(),
             RichConsoleObserver(),
             TrajectoryFileObserver(
@@ -1685,6 +1738,21 @@ async def main_agent_node(
     # Drop this run's task board so it doesn't leak across trials in a
     # long-lived worker process (no-op if the agent never used add_task).
     clear_board(ctx.task_id)
+
+    # Real, TEMPORARY diagnostic instrumentation, added 2026-09-12, to
+    # directly investigate the real, confirmed-live "llm_error" turn-1
+    # failure with phi4:latest -- print() (not logger.info()) because this
+    # codebase never calls logging.basicConfig(), confirmed directly
+    # earlier this session, so logger output has nowhere real to go.
+    if result.metadata.get("llm_error"):
+        print(
+            f"[LLM_ERROR_DEBUG] task={ctx.task_id} "
+            f"llm_error={result.metadata.get('llm_error')!r} "
+            f"llm_error_reason={result.metadata.get('llm_error_reason')!r} "
+            f"stopped_by={result.stopped_by!r}",
+            flush=True,
+        )
+
 
     return {
         "final_answer": final_text,

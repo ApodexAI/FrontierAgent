@@ -1,0 +1,13 @@
+The Rung Strategy: A Real Trading Approach
+
+The rung strategy is a systematic approach to position sizing and profit-taking
+in volatile assets. Rather than buying or selling all at once, positions are
+built and reduced in discrete steps ("rungs") at predetermined price levels.
+
+Key benefits: reduces timing risk, enforces discipline, avoids emotional
+decision-making during volatility. Key drawback: can underperform a simple
+buy-and-hold approach in strongly trending markets, since capital is held back
+for rungs that may never be reached.
+
+This approach works best for assets with genuine, cyclical volatility rather
+than assets in a persistent one-directional trend.
