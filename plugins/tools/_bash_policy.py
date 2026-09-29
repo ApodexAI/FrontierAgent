@@ -2051,7 +2051,8 @@ def _env_split_payloads(tokens: list[str]) -> list[str]:
 
     ``env -S 'sudo id'`` executes ``sudo id``, but as one shell word it looked
     like a single argument and the real command was never assessed. The
-    payload is returned with the remaining words appended, as env does.
+    payload is returned as an ``env`` command line with the remaining words
+    appended, as env runs it.
     """
     if _is_command_lookup(tokens):
         return []
@@ -2080,7 +2081,11 @@ def _env_split_payloads(tokens: list[str]) -> list[str]:
                 else:
                     break
             if payload is not None:
-                return [" ".join([payload, *(shlex.quote(w) for w in tokens[i:])])]
+                # Re-prefixed with ``env``: the split string may itself start
+                # with env options (``env -S '-i sudo id'``, the shebang idiom
+                # ``env -S -i python3``), which only env's own option skipping
+                # resolves to the real executable.
+                return [" ".join(["env", payload, *(shlex.quote(w) for w in tokens[i:])])]
             if t == "--" or not t.startswith("-"):
                 break
             i += 2 if t in _WRAPPER_OPTION_VALUES["env"] else 1
@@ -2100,7 +2105,7 @@ def _dynamic_env_split_reason(commands: list[list[str]]) -> str | None:
                 words = tokenize_shell_segment(payload)
             except ValueError:
                 return "Cannot safely inspect the executable in `env -S`."
-            exe, _ = _resolve_exe(["env", *words])
+            exe, _ = _resolve_exe(words)
             if exe is not None and _is_dynamic_name(exe):
                 return (
                     "Refuses `env -S` with a dynamically generated executable "

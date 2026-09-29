@@ -463,6 +463,11 @@ _HIDDEN_GROUP_COMMANDS = [
     ("env -iS 'sudo id'", "priv_esc"),
     ("env --split-string='pkill -f x'", "process_kill"),
     ("env -u X -S 'rsync -a / r:/'", "exfil"),
+    # the split string may carry env's own options first
+    ("env -S '-i sudo id'", "priv_esc"),
+    ("env -S '-u HOME ssh h'", "exfil"),
+    ("env -S '-- kill 1'", "process_kill"),
+    ("env -S '-S sudo id'", "priv_esc"),
     # ANSI-C quoting
     ("bash -c $'sudo id'", "priv_esc"),
     ("eval $'sudo id'", "priv_esc"),
