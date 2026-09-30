@@ -15,6 +15,7 @@
   <a href="https://discord.gg/TDJA59TCng"><img alt="Discord" src="https://img.shields.io/badge/Discord-Apodex_AI-5865F2"/></a>
   <a href="https://x.com/Apodex_AI"><img alt="X" src="https://img.shields.io/badge/X-@Apodex__AI-000000?logo=x&logoColor=white"/></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/License-Apache_2.0-blue"/></a>
+  <a href="https://trendshift.io/repositories/182526?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-182526" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/182526/daily?language=Python" alt="ApodexAI%2FFrontierAgent | Trendshift" width="250" height="55"/></a>
 </div>
 <br>
 <p align="center">
