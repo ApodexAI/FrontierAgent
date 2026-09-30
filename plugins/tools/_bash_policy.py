@@ -25,12 +25,19 @@ logger = logging.getLogger(__name__)
 class BashCommandAssessment:
     level: str  # "allow" | "audit" | "confirm" | "deny"
     reason: str
+    # Name of the always-denied group (``priv_esc`` / ``exfil`` /
+    # ``process_kill``) that produced this verdict, else "". Lets an
+    # interactive caller tell a group hit apart from an ordinary confirm.
+    group: str = ""
 
 
 # ── Mode resolution ─────────────────────────────────────────────────────
 
 _VALID_MODES = ("off", "warn", "enforce")
 _DEFAULT_MODE = "off"
+# Ordered loosest → strictest, so a tighten-only source can be reconciled by
+# taking the stricter of two modes.
+_MODE_RANK = {"off": 0, "warn": 1, "enforce": 2}
 
 # Per-run override, set by workflows adjacent to their per-task sandbox (mirrors
 # the ``_task_sandbox`` contextvar pattern). Propagates into child asyncio tasks
@@ -42,9 +49,22 @@ _policy_mode_var: contextvars.ContextVar[str | None] = contextvars.ContextVar(
 
 def set_policy_mode(mode: str) -> contextvars.Token:
     """Set the bash-policy mode for the current context. Returns a token for
-    :func:`reset_policy_mode`. An invalid mode stores ``None`` (→ falls back to
-    env / config / default)."""
-    return _policy_mode_var.set(mode if mode in _VALID_MODES else None)
+    :func:`reset_policy_mode`.
+
+    An unrecognised mode is refused with a warning and stores ``None`` (→ falls
+    back to env / config / default). The warning matters: a typo used to fail
+    SILENTLY toward ``_DEFAULT_MODE``, i.e. toward ``off`` — a caller asking for
+    ``enfoce`` got the allowlist switched off, which is the one direction a
+    mistake must never take.
+    """
+    if mode not in _VALID_MODES:
+        logger.warning(
+            "ignoring unknown bash policy mode (expected one of %s); "
+            "falling back to env / config / %s",
+            ", ".join(_VALID_MODES), _DEFAULT_MODE,
+        )
+        return _policy_mode_var.set(None)
+    return _policy_mode_var.set(mode)
 
 
 def reset_policy_mode(token: contextvars.Token) -> None:
@@ -80,19 +100,30 @@ def resolve_mode(explicit: str | None = None) -> str:
     """Resolve the effective policy mode.
 
     Precedence: explicit arg → ``BASH_ALLOWLIST_MODE`` env (ops override) →
-    per-run contextvar (workflow default) → config → ExecutionScope metadata →
-    ``off``.
+    per-run contextvar (workflow default) → config → ``off``.
+
+    ExecutionScope metadata is workload input rather than a statement about the
+    environment, so it can only TIGHTEN the mode the trusted sources settled on
+    (``off`` → ``enforce``), never loosen it. An explicit argument comes from
+    the calling code itself and is taken as is.
     """
+    if explicit:
+        candidate = explicit.strip().lower()
+        if candidate in _VALID_MODES:
+            return candidate
+    resolved = _DEFAULT_MODE
     for candidate in (
-        (explicit or "").strip().lower() if explicit else "",
         _env_mode(),
         _policy_mode_var.get() or "",
         _config_mode(),
-        _scope_mode(),
     ):
         if candidate in _VALID_MODES:
-            return candidate
-    return _DEFAULT_MODE
+            resolved = candidate
+            break
+    scope = _scope_mode()
+    if scope in _VALID_MODES and _MODE_RANK[scope] > _MODE_RANK[resolved]:
+        return scope
+    return resolved
 
 
 # ── Layer 1: hard denylist (all modes) ──────────────────────────────────
@@ -220,15 +251,35 @@ _SHELL_SYNTAX_TOKEN = "__frontier_agent_shell_syntax__"
 _WRAPPER_VALUE_RE = re.compile(r"\d+(\.\d+)?[a-zA-Z]?\Z")
 
 
-def _skip_wrapper_args(argv: list[str], i: int) -> int:
+# Options whose following word belongs to the wrapper, not its command
+# (``env -u UNUSED bash`` / ``timeout --signal TERM 5 bash``).
+_WRAPPER_OPTION_VALUES = {
+    "env": {"-u", "--unset", "-C", "--chdir", "-S", "--split-string"},
+    "sudo": {"-u", "--user", "-g", "--group", "-h", "--host", "-p", "--prompt"},
+    "timeout": {"-s", "--signal", "-k", "--kill-after"},
+    "nice": {"-n", "--adjustment"},
+    "ionice": {"-c", "--class", "-n", "--classdata", "-p", "--pid"},
+    "xargs": {"-I", "-n", "--max-args", "-P", "--max-procs", "-d", "--delimiter"},
+}
+
+
+def _skip_wrapper_args(argv: list[str], i: int, *, wrapper: str = "") -> int:
     """Advance ``i`` past a wrapper's option flags AND the separate value tokens
     they consume, so ``nice -n 10 rm`` / ``timeout -s 9 10 bash`` resolve to the
     real command (``rm`` / ``bash``) rather than the value token (``10``). This
     is the single home for wrapper-arg skipping — shared by
     strip_command_prefixes and
-    _resolve_exe so they can't drift."""
+    _resolve_exe so they can't drift.
+
+    ``wrapper`` names the wrapper being skipped, so a non-numeric option value
+    (``env -u UNUSED``) is not read as the wrapped command."""
     n = len(argv)
     while i < n and (argv[i].startswith("-") or _WRAPPER_VALUE_RE.fullmatch(argv[i])):
+        if argv[i] == "--":
+            return i + 1
+        if argv[i] in _WRAPPER_OPTION_VALUES.get(wrapper, ()):
+            i += 2
+            continue
         i += 1
     return i
 
@@ -241,6 +292,104 @@ _REDIRECT_RE = re.compile(
     r"^(?:\d+|&)?(?:<<<|<<-?|<&|>&|>>|>\||<>|<|>)(.*)$",
 )
 _REDIRECT_SENTINEL = "\x1e"
+
+
+_ANSI_C_SIMPLE_ESCAPES = {
+    "a": "\a", "b": "\b", "e": "\x1b", "E": "\x1b", "f": "\f", "n": "\n",
+    "r": "\r", "t": "\t", "v": "\v", "\\": "\\", "'": "'", '"': '"', "?": "?",
+}
+
+
+def _decode_ansi_c(body: str) -> str:
+    """Decode the escapes bash applies inside ``$'...'``. Unknown escapes keep
+    their backslash, as bash does, so decoding never fails."""
+    out: list[str] = []
+    i, n = 0, len(body)
+    while i < n:
+        c = body[i]
+        if c != "\\" or i + 1 >= n:
+            out.append(c)
+            i += 1
+            continue
+        e = body[i + 1]
+        if e in _ANSI_C_SIMPLE_ESCAPES:
+            out.append(_ANSI_C_SIMPLE_ESCAPES[e])
+            i += 2
+        elif e in "01234567":
+            m = re.match(r"[0-7]{1,3}", body[i + 1:])
+            digits = m.group(0) if m else e
+            out.append(chr(int(digits, 8) & 0xFF))
+            i += 1 + len(digits)
+        elif e in "xuU":
+            limit = {"x": 2, "u": 4, "U": 8}[e]
+            m = re.match(rf"[0-9A-Fa-f]{{1,{limit}}}", body[i + 2:])
+            if m:
+                try:
+                    out.append(chr(int(m.group(0), 16)))
+                except (ValueError, OverflowError):
+                    out.append("\ufffd")
+                i += 2 + len(m.group(0))
+            else:
+                out.append(body[i:i + 2])
+                i += 2
+        elif e == "c" and i + 2 < n:
+            out.append(chr(ord(body[i + 2]) & 0x1F))
+            i += 3
+        else:
+            out.append(body[i:i + 2])
+            i += 2
+    return "".join(out)
+
+
+def _normalize_ansi_c_quotes(command: str) -> str:
+    """Rewrite every unquoted ``$'...'`` word into the equivalent plain
+    single-quoted word.
+
+    ``shlex`` does not know ANSI-C quoting: it read ``bash -c $'sudo id'`` as
+    the payload ``$sudo id`` — an executable named ``$sudo`` that matched no
+    rule — and the ``\\'`` escape it allows also desynchronised every quote
+    tracker in this module. Normalising once, before any scanner runs, gives
+    all of them (and the recursion into payloads) the text bash executes.
+    """
+    if "$'" not in command:
+        return command
+    out: list[str] = []
+    i, n = 0, len(command)
+    quote: str | None = None
+    while i < n:
+        c = command[i]
+        if quote:
+            out.append(c)
+            if c == "\\" and quote == '"' and i + 1 < n:
+                out.append(command[i + 1])
+                i += 2
+                continue
+            if c == quote:
+                quote = None
+            i += 1
+            continue
+        if c == "\\" and i + 1 < n:
+            out.append(command[i:i + 2])
+            i += 2
+            continue
+        if c == "$" and command[i + 1:i + 2] == "'":
+            j = i + 2
+            while j < n and command[j] != "'":
+                j += 2 if command[j] == "\\" else 1
+            body = command[i + 2:min(j, n)]
+            decoded = _decode_ansi_c(body)
+            out.append("'" + decoded.replace("'", "'\"'\"'") + "'")
+            if j >= n:
+                # Unterminated: keep the opening quote unbalanced so the parser
+                # reports it instead of silently accepting the text.
+                out.append("'")
+            i = j + 1
+            continue
+        if c in ("'", '"'):
+            quote = c
+        out.append(c)
+        i += 1
+    return "".join(out)
 
 
 def tokenize_shell_segment(segment: str) -> list[str]:
@@ -352,7 +501,7 @@ def strip_command_prefixes(argv: list[str]) -> list[str]:
             continue
         base = _basename(tok)
         if base in _PRIV_ESC or base in _WRAPPERS:
-            i = _skip_wrapper_args(argv, i + 1)
+            i = _skip_wrapper_args(argv, i + 1, wrapper=base)
             continue
         if tok == _SHELL_SYNTAX_TOKEN:
             i += 1
@@ -491,41 +640,90 @@ _WRAPPERS = frozenset({
     "chrt", "xargs", "command", "exec", "builtin",
 })
 
-# Denied in ``warn`` and ``enforce`` — but NOT in ``off``, which is
-# ``_DEFAULT_MODE`` and therefore what most deployments run. This table is
-# consulted from ``_assess_allowlist``, which the ``off`` branch returns before
-# reaching; in ``off`` the only binding checks are ``_DENY_PATTERNS`` and
-# ``_argv_hard_deny`` above. Anything that must hold unconditionally (e.g.
-# ``curl … | bash``) belongs there, not here.
+# Denied binaries, split into NAMED GROUPS because they bind at different
+# layers. ``_assess_allowlist`` (Layer 2, ``warn``/``enforce`` only) consults
+# all of them. The groups in ``_ALWAYS_DENIED_GROUPS`` additionally bind in
+# EVERY mode through ``_argv_group_deny`` (Layer 1.5): they used to be
+# consulted only from Layer 2, which the default ``off`` mode never reaches, so
+# ``sudo id`` / ``ssh host 'cat ~/.aws/credentials'`` / ``pkill -f python3``
+# assessed as ``allow``. ``strip_command_prefixes`` deliberately *strips*
+# ``sudo`` so the hard denylist can see the real command behind it, and no
+# ``_DENY_PATTERNS`` entry covered the escalation itself.
 #
-# Privilege escalation / nested shells / remote administration / host +
-# package management. HTTP download clients are intentionally absent: current
-# task containers have a writable filesystem and network access, and
-# controlled document downloads use ``download_file``.
-_DENIED_BINARIES: dict[str, str] = {
-    **{b: "Privilege escalation is not allowed." for b in ("sudo", "su", "doas", "pkexec")},
+# HTTP download clients are intentionally absent: current task containers have
+# a writable filesystem and network access, and controlled document downloads
+# use ``download_file``.
+_DENY_GROUP_PRIV_ESC: dict[str, str] = {
+    b: "Privilege escalation is not allowed." for b in ("sudo", "su", "doas", "pkexec")
+}
+
+_DENY_GROUP_NESTED_SHELL: dict[str, str] = {
     **{b: (
         "Nested/piped shells are not allowed — run the program directly or use "
         "a ``python3 <<'PY' ... PY`` heredoc."
     ) for b in ("bash", "sh", "zsh", "dash", "ksh", "csh", "tcsh", "fish", "ash")},
     "eval": "``eval`` of dynamic strings is not allowed.",
-    **{b: (
+}
+
+_DENY_GROUP_EXFIL: dict[str, str] = {
+    b: (
         "Interactive network and remote-administration clients are not allowed. "
         "Use web/search/download tools or an HTTP client instead."
     ) for b in (
         "nc", "ncat", "netcat", "socat", "telnet",
         "ssh", "scp", "sftp", "ftp", "tftp", "rsync", "rclone",
-    )},
-    **{b: "System / host administration is not allowed." for b in (
+    )
+}
+
+# Signal senders, split out of host administration so they bind in every mode.
+# agent_team sub-agents share one uid and PID namespace, so ``pkill -f python3``
+# from one sub-agent kills its siblings' commands, and the corpse surfaces as
+# exit 137 that ``bash.py`` reports as a memory failure to the wrong agent.
+_DENY_GROUP_PROCESS_KILL: dict[str, str] = {
+    b: "System / host administration is not allowed." for b in ("kill", "killall", "pkill")
+}
+
+_DENY_GROUP_HOST_ADMIN: dict[str, str] = {
+    b: "System / host administration is not allowed." for b in (
         "mount", "umount", "fdisk", "parted", "swapon", "systemctl", "service",
         "init", "kexec", "insmod", "modprobe", "sysctl", "iptables", "nft",
-        "ip", "ifconfig", "route", "ufw", "kill", "killall", "pkill",
+        "ip", "ifconfig", "route", "ufw",
         "crontab", "at", "batch",
-    )},
-    **{b: "Installing system packages is not allowed." for b in (
+    )
+}
+
+_DENY_GROUP_PKG_MGR: dict[str, str] = {
+    b: "Installing system packages is not allowed." for b in (
         "apt", "apt-get", "aptitude", "yum", "dnf", "dpkg", "rpm", "pacman",
         "brew", "conda", "mamba", "snap",
-    )},
+    )
+}
+
+_DENY_GROUPS: dict[str, dict[str, str]] = {
+    "priv_esc": _DENY_GROUP_PRIV_ESC,
+    "nested_shell": _DENY_GROUP_NESTED_SHELL,
+    "exfil": _DENY_GROUP_EXFIL,
+    "process_kill": _DENY_GROUP_PROCESS_KILL,
+    "host_admin": _DENY_GROUP_HOST_ADMIN,
+    "pkg_mgr": _DENY_GROUP_PKG_MGR,
+}
+
+# Bound in every mode (Layer 1.5). Nested shells, host administration and
+# package managers stay Layer-2 only: ``off`` is what the local coding CLI runs,
+# where ``bash ./build.sh`` / ``make`` / ``apt-get`` are ordinary work behind a
+# human approval gate.
+_ALWAYS_DENIED_GROUPS = ("priv_esc", "exfil", "process_kill")
+
+_DENIED_BINARIES: dict[str, str] = {
+    binary: reason
+    for group in _DENY_GROUPS.values()
+    for binary, reason in group.items()
+}
+
+_ALWAYS_DENIED_BINARIES: dict[str, tuple[str, str]] = {
+    binary: (group, reason)
+    for group in _ALWAYS_DENIED_GROUPS
+    for binary, reason in _DENY_GROUPS[group].items()
 }
 
 # Allowlisted but noteworthy → ``audit`` (runs, tagged).
@@ -535,7 +733,6 @@ _AUDIT_BINARIES = frozenset({"pip", "pip3"})
 _INLINE_CODE_FLAGS = frozenset({"-c", "-e", "--command", "--eval"})
 
 _ASSIGN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
-_HEREDOC_RE = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_]\w*)\1")
 _REDIRECT_PROTECTED_RE = re.compile(
     r"(?:&>>?|>\||>&|>>?)\s*"
     r"(/(?:etc|usr|bin|sbin|lib|lib64|boot|dev|proc|sys|var|root|opt)\b\S*)"
@@ -571,51 +768,181 @@ def _line_invokes_shell(pre: str) -> bool:
     if not segs:
         return False
     try:
-        toks = shlex.split(segs[-1], comments=False)
+        toks = tokenize_shell_segment(_mask_nested_shell(segs[-1]))
     except ValueError:
         return False
     if not toks:
         return False
-    exe, _ = _resolve_exe(toks)
-    return exe in _SHELLS
+    keyword = _leading_shell_keyword(segs[-1])
+    if keyword in _CONTROL_LEADERS and toks[0] == keyword:
+        toks[0] = _SHELL_SYNTAX_TOKEN
+    argv = strip_command_prefixes(toks)
+    return bool(argv) and _basename(argv[0]) in _SHELLS
+
+
+def _bracket_end(line: str, start: int, opener: str, closer: str) -> int:
+    """Index just past the ``closer`` matching the ``opener`` before ``start``,
+    or ``-1`` when it does not close on this line."""
+    depth = 1
+    i = start
+    while i < len(line):
+        c = line[i]
+        if c == "\\":
+            i += 2
+            continue
+        if c == opener:
+            depth += 1
+        elif c == closer:
+            depth -= 1
+            if depth == 0:
+                return i + 1
+        i += 1
+    return -1
+
+
+def _heredoc_declarations(
+    line: str, quote: str | None,
+) -> tuple[list[tuple[str, bool, bool, bool]], str | None]:
+    """Read only unquoted heredoc operators, preserving multiline quote state.
+
+    Returns ``([(delimiter, quoted, strip_tabs, consumer_is_shell), ...],
+    quote_state_after_line)``. Delimiter words undergo quote removal, not
+    expansion. A ``<<`` in a comment, a quoted argument, a here-string or an
+    arithmetic/substitution span is not a declaration and must never consume
+    the lines after it — that would hide real commands as heredoc data.
+    """
+    declarations: list[tuple[str, bool, bool, bool]] = []
+    expansion_ends = {start: end for start, end, *_ in _substitution_spans(line)}
+    i = 0
+    while i < len(line):
+        if quote != "'" and i in expansion_ends:
+            i = expansion_ends[i]
+            continue
+        c = line[i]
+        if c == "\\" and quote != "'":
+            i += 2
+            continue
+        if quote:
+            if c == quote:
+                quote = None
+            i += 1
+            continue
+        if c in ("'", '"'):
+            quote = c
+            i += 1
+            continue
+        if c == "#" and (i == 0 or line[i - 1] in " \t;|&("):
+            break
+        if line.startswith("((", i):
+            end = _find_expansion_end(line, i + 2, 2)
+            if end >= 0:
+                i = end
+                continue
+        # ``<<`` is a shift, not a heredoc, inside ``$[...]`` arithmetic,
+        # ``${...}`` parameter expansion and ``name[...]`` subscripts. Mistaking
+        # one for a heredoc would hide every following line as data, so skip
+        # them; over-skipping only exposes more text as code.
+        if line.startswith(("$[", "${"), i):
+            end = _bracket_end(line, i + 2, line[i + 1], "]" if line[i + 1] == "[" else "}")
+            if end >= 0:
+                i = end
+                continue
+        if c == "[" and i and (line[i - 1].isalnum() or line[i - 1] == "_"):
+            end = _bracket_end(line, i + 1, "[", "]")
+            if end >= 0:
+                i = end
+                continue
+        if line.startswith("<<<", i):
+            i += 3
+            continue
+        if not line.startswith("<<", i):
+            i += 1
+            continue
+        start = i
+        i += 2
+        tabs = line[i:i + 1] == "-"
+        i += int(tabs)
+        while i < len(line) and line[i] in " \t":
+            i += 1
+        word_start = i
+        delimiter_quote = None
+        quoted = False
+        while i < len(line):
+            c = line[i]
+            if c == "\\" and delimiter_quote != "'":
+                quoted = True
+                i += 2
+                continue
+            if delimiter_quote:
+                if c == delimiter_quote:
+                    delimiter_quote = None
+            elif c in ("'", '"'):
+                quoted = True
+                delimiter_quote = c
+            elif c in " \t;<>&|()":
+                break
+            i += 1
+        word = line[word_start:i]
+        try:
+            tokens = shlex.split(word)
+        except ValueError:
+            continue  # leave malformed headers for the command parser
+        if len(tokens) == 1:
+            declarations.append((
+                tokens[0], quoted, tabs, _line_invokes_shell(line[:start]),
+            ))
+    return declarations, quote
 
 
 def _strip_heredoc_bodies(command: str) -> tuple[str, list[str]]:
     """Drop here-document *bodies* (data, not commands) so they aren't parsed as
     top-level shell. Returns ``(stripped_command, shell_bodies)`` where
-    ``shell_bodies`` are the bodies whose consuming command is a shell (e.g.
-    ``bash <<EOF … EOF`` — the body is shell code the shell executes, so it is
-    recursed into by :func:`_parse_commands`). The ``cmd <<'MARKER'`` line is
-    kept."""
+    ``shell_bodies`` is the code the shell still runs: bodies consumed by a
+    shell (``bash <<EOF … EOF``), the ``$(...)`` in unquoted bodies, and — fail
+    closed — the rest of a heredoc whose delimiter never arrives. The
+    ``cmd <<'MARKER'`` line is kept.
+
+    Multiple declarations on one line consume bodies in declaration order.
+    Only ``<<-`` strips tabs; spaces and other indentation never close a
+    heredoc."""
     lines = command.split("\n")
     out: list[str] = []
     shell_bodies: list[str] = []
+    quote: str | None = None
     i = 0
     while i < len(lines):
         line = lines[i]
         out.append(line)
-        m = _HEREDOC_RE.search(line)
-        if m:
-            delim = m.group(2)
-            quoted = bool(m.group(1))  # <<'EOF' / <<"EOF" suppress expansion
-            consumer_is_shell = _line_invokes_shell(line[:m.start()])
-            i += 1
-            body: list[str] = []
-            while i < len(lines) and lines[i].strip() != delim:
-                body.append(lines[i])
-                i += 1
-            i += 1  # skip the closing delimiter line
-            body_text = "\n".join(body)
-            if body_text:
-                if consumer_is_shell:
-                    # The whole body is shell code the shell executes.
-                    shell_bodies.append(body_text)
-                elif not quoted:
-                    # Unquoted delimiter: the shell still expands $()/`` in the
-                    # body before the (non-shell) consumer sees it.
-                    shell_bodies.extend(_extract_nested_shell(body_text))
-            continue
+        declarations, quote = _heredoc_declarations(line, quote)
         i += 1
+        for delim, quoted, tabs, consumer_is_shell in declarations:
+            body: list[str] = []
+            closed = False
+            while i < len(lines):
+                current = lines[i].lstrip("\t") if tabs else lines[i]
+                i += 1
+                if current == delim:
+                    closed = True
+                    break
+                body.append(current)
+            body_text = "\n".join(body)
+            # An empty delimiter closes on an empty line, which the caller's
+            # ``strip()`` removes when it ends the command.
+            if not closed and delim:
+                # A delimiter that never closes usually means ``<<`` was not a
+                # heredoc at all (a shift we failed to recognise). Treating the
+                # rest of the command as data would hide it from every check,
+                # so screen it as code instead.
+                shell_bodies.append(body_text)
+            elif consumer_is_shell:
+                shell_bodies.append(body_text)
+            elif not quoted:
+                # Unquoted delimiter: the shell still expands $()/`` in the
+                # body before the (non-shell) consumer sees it, and quotes in
+                # the body are ordinary characters there.
+                shell_bodies.extend(
+                    _extract_nested_shell(body_text, literal_quotes=True)
+                )
     return "\n".join(out), shell_bodies
 
 
@@ -716,16 +1043,33 @@ def _split_top_level(command: str) -> list[str]:
     Command substitutions ``$(...)`` and backtick spans are copied verbatim (NOT
     split) — their inner commands are assessed separately via
     :func:`_extract_nested_shell`, so a top-level ``;``/``|`` inside a ``$(...)``
-    must not fragment the outer command. Bare ``(``/``)`` (subshell grouping) DO
-    split, so ``(rm -rf /)`` is analysed. Redirections (``>`` ``<``) do not split.
+    must not fragment the outer command. Their extent comes from
+    :func:`_find_expansion_end`, the same scanner extraction uses, so a quoted
+    ``)`` cannot end one early here while extraction reads it differently.
+    Bare ``(``/``)`` (subshell grouping) DO split, so ``(rm -rf /)`` is
+    analysed. Redirections (``>`` ``<``) do not split.
     """
     segs: list[str] = []
     buf: list[str] = []
     i, n = 0, len(command)
     quote: str | None = None
-    subst = 0  # depth inside $(...)
     while i < n:
         c = command[i]
+        if quote != "'" and c == "$" and command[i + 1:i + 2] == "(":
+            arithmetic = command[i + 2:i + 3] == "("
+            end = _find_expansion_end(
+                command, i + (3 if arithmetic else 2), 2 if arithmetic else 1,
+            )
+            end = n if end < 0 else end
+            buf.append(command[i:end])
+            i = end
+            continue
+        if quote != "'" and c == "`":  # backtick span — copy to its closer
+            end = _backtick_end(command, i)
+            end = n if end < 0 else end
+            buf.append(command[i:end])
+            i = end
+            continue
         if quote:
             buf.append(c)
             if c == "\\" and quote == '"' and i + 1 < n:
@@ -734,14 +1078,6 @@ def _split_top_level(command: str) -> list[str]:
                 continue
             if c == quote:
                 quote = None
-            i += 1
-            continue
-        if subst > 0:  # inside $(...): copy verbatim, track nesting, never split
-            buf.append(c)
-            if c == "(":
-                subst += 1
-            elif c == ")":
-                subst -= 1
             i += 1
             continue
         if c in ("'", '"'):
@@ -753,21 +1089,6 @@ def _split_top_level(command: str) -> list[str]:
             buf.append(c)
             buf.append(command[i + 1])
             i += 2
-            continue
-        if c == "$" and i + 1 < n and command[i + 1] == "(":
-            buf.append("$(")
-            subst = 1
-            i += 2
-            continue
-        if c == "`":  # backtick span — copy verbatim to the closing backtick
-            buf.append(c)
-            i += 1
-            while i < n and command[i] != "`":
-                buf.append(command[i])
-                i += 1
-            if i < n:
-                buf.append(command[i])
-                i += 1
             continue
         # Redirection operators that CONTAIN a control character must not split:
         # ``2>&1`` / ``>&2`` (fd duplication) and ``&>file`` / ``&>>file``
@@ -798,45 +1119,169 @@ def _split_top_level(command: str) -> list[str]:
     return [s.strip() for s in segs if s.strip()]
 
 
-def _extract_nested_shell(command: str) -> list[str]:
+# Inert stand-ins for expansions in the OUTER view of a command. Never shown to
+# the model: a deny reason that would name one describes it in words instead.
+_SUBSTITUTION_SENTINEL = "__FA_COMMAND_SUBSTITUTION__"
+_ARITHMETIC_SENTINEL = "__FA_ARITHMETIC_EXPANSION__"
+
+
+def _find_expansion_end(command: str, start: int, depth: int) -> int:
+    """Index just past the parens closing an expansion that opened at ``start``,
+    or ``-1`` when it is unterminated.
+
+    Quoted parens do not count: ``$(echo ")")`` ends at the last ``)``, not the
+    quoted one.
+    """
+    j, n = start, len(command)
+    quote: str | None = None
+    while j < n and depth:
+        c = command[j]
+        if quote == "'":
+            if c == "'":
+                quote = None
+            j += 1
+            continue
+        if c == "\\" and j + 1 < n:
+            j += 2
+            continue
+        if quote == '"':
+            if c == '"':
+                quote = None
+            j += 1
+            continue
+        if c in ("'", '"'):
+            quote = c
+        elif c == "(":
+            depth += 1
+        elif c == ")":
+            depth -= 1
+        j += 1
+    return -1 if depth else j
+
+
+def _backtick_end(command: str, start: int) -> int:
+    """Index just past the backtick closing the one at ``start``, or ``-1``
+    when it never closes."""
+    j, n = start + 1, len(command)
+    while j < n:
+        if command[j] == "\\" and j + 1 < n:
+            j += 2
+            continue
+        if command[j] == "`":
+            return j + 1
+        j += 1
+    return -1
+
+
+def _substitution_spans(
+    command: str, *, literal_quotes: bool = False,
+) -> list[tuple[int, int, int, int, str]]:
+    """Locate every expansion the shell evaluates, as ``(start, end, inner
+    start, inner end, kind)`` with ``kind`` in ``{"command", "arithmetic"}``.
+
+    This is the single source of truth for *where an expansion begins and ends*.
+    Masking (:func:`_mask_nested_shell`) and extraction
+    (:func:`_extract_nested_shell`) are two views of the same spans; when they
+    scanned independently they disagreed on quoted delimiters and a nested
+    command could end up assessed by neither view (``x=$(echo ")"; sudo id)``).
+
+    Only top-level spans are returned — a substitution nested inside another is
+    reached by assessing the outer one's body recursively. Single-quoted spans
+    are skipped (the shell does not expand them), but double-quoted ones are
+    not: ``"$(sudo id)"`` still runs. An unterminated expansion extends to the
+    end of the text, so its body is still assessed (fail-closed).
+
+    ``literal_quotes`` is for unquoted here-document bodies, where ``'`` and
+    ``"`` are ordinary characters and never suppress expansion.
+    """
+    spans: list[tuple[int, int, int, int, str]] = []
+    i, n = 0, len(command)
+    quote: str | None = None
+    while i < n:
+        c = command[i]
+        if quote == "'":
+            if c == "'":
+                quote = None
+            i += 1
+            continue
+        if c == "\\" and i + 1 < n:
+            i += 2
+            continue
+        if quote is None and not literal_quotes:
+            if c in ("'", '"'):
+                quote = c
+                i += 1
+                continue
+        elif quote == '"' and c == '"':
+            quote = None
+            i += 1
+            continue
+        if c == "$" and i + 1 < n and command[i + 1] == "(":
+            # ``$((`` is arithmetic: it expands a number rather than running a
+            # command, so its body is not shell code (but may still contain a
+            # real substitution, which the caller reaches by recursing).
+            arithmetic = i + 2 < n and command[i + 2] == "("
+            inner_start = i + 3 if arithmetic else i + 2
+            end = _find_expansion_end(command, inner_start, 2 if arithmetic else 1)
+            if end < 0:
+                spans.append((i, n, inner_start, n, "command"))
+                break
+            inner_end = max(inner_start, end - (2 if arithmetic else 1))
+            spans.append(
+                (i, end, inner_start, inner_end, "arithmetic" if arithmetic else "command")
+            )
+            i = end
+            continue
+        if c == "`":
+            end = _backtick_end(command, i)
+            if end < 0:
+                spans.append((i, n, i + 1, n, "command"))
+                break
+            spans.append((i, end, i + 1, end - 1, "command"))
+            i = end
+            continue
+        i += 1
+    return spans
+
+
+def _mask_nested_shell(command: str) -> str:
+    """Replace expansions with inert tokens for outer parsing.
+
+    Nested code is parsed independently by :func:`_extract_nested_shell`. If
+    it is also left verbatim for tokenization, an assignment such as
+    ``version=$(nginx -V)`` becomes ``['version=$(nginx', '-V)']`` and the
+    option is falsely assessed as an executable. Masking only the outer view
+    preserves both checks: the assignment stays an assignment, while the real
+    ``nginx -V`` command is still assessed recursively.
+    """
+    spans = _substitution_spans(command)
+    if not spans:
+        return command
+    out: list[str] = []
+    prev = 0
+    for start, end, _inner_start, _inner_end, kind in spans:
+        out.append(command[prev:start])
+        out.append(_ARITHMETIC_SENTINEL if kind == "arithmetic" else _SUBSTITUTION_SENTINEL)
+        prev = end
+    out.append(command[prev:])
+    return "".join(out)
+
+
+def _extract_nested_shell(command: str, *, literal_quotes: bool = False) -> list[str]:
     """Return shell-code strings nested in ``$(...)`` and backticks (which the
     shell expands+executes). Single-quoted spans are skipped — the shell does
     not expand them, so ``echo '$(rm -rf /)'`` is a harmless literal."""
     out: list[str] = []
-    i, n = 0, len(command)
-    sq = False
-    while i < n:
-        c = command[i]
-        if sq:
-            if c == "'":
-                sq = False
-            i += 1
-            continue
-        if c == "'":
-            sq = True
-            i += 1
-            continue
-        if c == "$" and i + 1 < n and command[i + 1] == "(":
-            depth, j = 1, i + 2
-            start = j
-            while j < n and depth:
-                if command[j] == "(":
-                    depth += 1
-                elif command[j] == ")":
-                    depth -= 1
-                j += 1
-            if depth == 0:
-                out.append(command[start:j - 1])
-            i = j
-            continue
-        if c == "`":
-            j = i + 1
-            while j < n and command[j] != "`":
-                j += 1
-            out.append(command[i + 1:j])
-            i = j + 1
-            continue
-        i += 1
+    for _start, _end, inner_start, inner_end, kind in _substitution_spans(
+        command, literal_quotes=literal_quotes,
+    ):
+        inner = command[inner_start:inner_end]
+        if kind == "arithmetic":
+            # The arithmetic body is not shell code, but ``$(( $(id) + 1 ))``
+            # still runs ``id``.
+            out.extend(_extract_nested_shell(inner))
+        elif inner:
+            out.append(inner)
     return out
 
 
@@ -865,12 +1310,886 @@ def _find_exec_payloads(argv: list[str]) -> list[list[str]]:
     return out
 
 
+def _blank_quoted(command: str) -> str:
+    """Replace the contents of quoted spans with spaces, keeping the quotes.
+
+    Quoted text is an argument, not a command name, so the raw hard-deny screen
+    should not match words inside it. Expansions that still run inside double
+    quotes are screened separately via :func:`_extract_nested_shell`.
+    """
+    out: list[str] = []
+    quote: str | None = None
+    i, n = 0, len(command)
+    while i < n:
+        c = command[i]
+        if quote is None:
+            if c == "\\" and i + 1 < n:
+                out.append(command[i:i + 2])
+                i += 2
+                continue
+            if c in ("'", '"'):
+                quote = c
+            out.append(c)
+        elif c == quote:
+            quote = None
+            out.append(c)
+        elif c == "\\" and quote == '"' and i + 1 < n:
+            out.append("  ")
+            i += 2
+            continue
+        else:
+            out.append("\n" if c == "\n" else " ")
+        i += 1
+    return "".join(out)
+
+
+def _shell_code_args(tokens: list[str]) -> list[str]:
+    """Code strings a simple command hands to a shell: the command string of
+    ``bash -c`` (also combined short flags such as ``-lc`` / ``-ec``) and the
+    arguments of ``eval``."""
+    argv = strip_command_prefixes(tokens)
+    if not argv:
+        return []
+    base = _basename(argv[0])
+    if base == "eval":
+        return [" ".join(argv[1:])] if len(argv) > 1 else []
+    if base not in _SHELLS:
+        return []
+    k = 1
+    while k < len(argv):
+        tok = argv[k]
+        if tok == "--" or not tok.startswith("-"):
+            break
+        if tok in {"-o", "-O", "--rcfile", "--init-file"}:
+            k += 2
+            continue
+        if tok.startswith("-") and not tok.startswith("--") and "c" in tok[1:]:
+            return argv[k + 1:k + 2]
+        k += 1
+    return []
+
+
+def _systemctl_requests_shutdown(args: list[str]) -> bool:
+    """Recognize shutdown verbs and activation of shutdown units.
+
+    systemctl accepts options before or after the verb. Option values are not
+    units; queries such as status/show must not be mistaken for activation.
+    """
+    values = {
+        "-H", "--host", "-M", "--machine", "-t", "--type", "--state",
+        "-p", "--property", "--root", "--image", "--boot-loader-entry",
+        "--boot-loader-menu", "--kill-whom", "-s", "--signal",
+    }
+    operands: list[str] = []
+    now = False
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg == "--":
+            operands.extend(args[i + 1:])
+            break
+        if not arg.startswith("-"):
+            operands.append(arg)
+        elif arg == "--now":
+            now = True
+        i += 2 if arg in values else 1
+    if not operands:
+        return False
+    operation, *units = operands
+    if operation in {"halt", "reboot", "poweroff"}:
+        return True
+    activates = operation in {
+        "start", "restart", "try-restart", "reload-or-restart", "reload-or-try-restart",
+        "isolate",
+    } or (operation in {"enable", "reenable"} and now)
+    shutdown_units = {
+        "halt.target", "reboot.target", "poweroff.target", "shutdown.target",
+        "runlevel0.target", "runlevel6.target", "ctrl-alt-del.target",
+        "systemd-halt.service", "systemd-reboot.service", "systemd-poweroff.service",
+    }
+    return activates and any(unit in shutdown_units for unit in units)
+
+
+# Commands that run their string arguments as shell code (``watch 'cmd'``,
+# ``tmux new -d 'cmd'``, ``ssh host 'cmd'``). Known forms have payload adapters;
+# unknown forms retain the unblanked screen rather than guessing option arity.
+_STRING_EVALUATORS = frozenset({
+    "watch", "tmux", "screen", "ssh", "script", "su", "runuser", "sg", "parallel",
+})
+# Commands that read shell code from stdin regardless of their arguments.
+_STDIN_CODE_READERS = frozenset({"at", "batch"})
+
+
+def _evaluator_options(
+    args: list[str], flags: str, values: str,
+    long_flags: frozenset[str] = frozenset(),
+    long_values: frozenset[str] = frozenset(),
+) -> tuple[list[str], dict[str, str]] | None:
+    """Consume documented options without losing operand boundaries.
+
+    Unknown options return None: their arity is unknown, so the caller must
+    retain the unblanked screen instead of guessing where executable code starts.
+    """
+    options: dict[str, str] = {}
+    i = 0
+    while i < len(args):
+        token = args[i]
+        if token == "--":
+            return args[i + 1:], options
+        if token == "-" or not token.startswith("-"):
+            break
+        if token.startswith("--"):
+            name, sep, value = token.partition("=")
+            if name in long_values:
+                if not sep:
+                    i += 1
+                    if i >= len(args):
+                        return None
+                    value = args[i]
+                options[name] = value
+            elif name in long_flags and not sep:
+                options[name] = ""
+            else:
+                return None
+        else:
+            j = 1
+            while j < len(token):
+                flag = token[j]
+                if flag in values:
+                    value = token[j + 1:]
+                    if not value:
+                        i += 1
+                        if i >= len(args):
+                            return None
+                        value = args[i]
+                    options["-" + flag] = value
+                    break
+                if flag not in flags:
+                    return None
+                options["-" + flag] = ""
+                j += 1
+        i += 1
+    return args[i:], options
+
+
+def _evaluator_payloads(tokens: list[str]) -> tuple[list[str], bool]:
+    """Return actual code arguments and whether conservative screening is needed.
+
+    Do not concatenate option values, host/session names or tmux subcommands
+    with the payload: doing so hides its executable behind an invented prefix.
+    Unsupported evaluator forms retain the whole-text protection.
+    """
+    argv = tokens
+    while argv:
+        exe = _basename(argv[0])
+        if exe in _STRING_EVALUATORS:
+            break
+        after_redirect = _skip_redirection(argv, 0)
+        if _ASSIGN_RE.match(argv[0]) or argv[0] == _SHELL_SYNTAX_TOKEN:
+            argv = argv[1:]
+        elif after_redirect is not None:
+            argv = argv[after_redirect:]
+        elif exe in _WRAPPERS or exe in _PRIV_ESC:
+            argv = argv[_skip_wrapper_args(argv, 1, wrapper=exe):]
+        else:
+            return [], False
+    if not argv:
+        return [], False
+    exe = _basename(argv[0])
+    # Redirections are marked by ``tokenize_shell_segment``, so dropping them
+    # cannot erase a quoted code argument that merely starts with ``>``.
+    args = _without_redirections(argv[1:])
+    parsed = None
+    direct = False
+    if exe == "watch":
+        parsed = _evaluator_options(
+            args, "bcdgpetwx", "nq",
+            frozenset({"--beep", "--color", "--differences", "--chgexit", "--errexit",
+                       "--precise", "--no-title", "--no-wrap", "--exec"}),
+            frozenset({"--interval", "--equexit"}),
+        )
+        if parsed:
+            direct = "-x" in parsed[1] or "--exec" in parsed[1]
+    elif exe == "tmux":
+        global_options = _evaluator_options(args, "2CDluUvV", "cfLST")
+        if not global_options or not global_options[0]:
+            return [], True
+        args, _ = global_options
+        subcommand, *args = args
+        if subcommand in {"new", "new-session"}:
+            parsed = _evaluator_options(args, "AdDEPX", "ceFnstxy")
+        elif subcommand in {"neww", "new-window"}:
+            parsed = _evaluator_options(args, "abdkPS", "ceFnt")
+        elif subcommand in {"splitw", "split-window"}:
+            parsed = _evaluator_options(args, "bdfhIvPZ", "ceFlt")
+        elif subcommand in {"respawnp", "respawn-pane", "respawnw", "respawn-window"}:
+            parsed = _evaluator_options(args, "k", "cet")
+        else:
+            return [], True
+        if parsed:
+            # tmux executes a single string via a shell, but multiple operands
+            # are an argv vector (preserve the nested shell's -c argument).
+            direct = len(parsed[0]) > 1
+    elif exe == "screen":
+        parsed = _evaluator_options(args, "AdmDqRx", "cSept")
+        direct = True
+    elif exe == "ssh":
+        parsed = _evaluator_options(args, "46AaCfGgKkMNnqsTtVvXxYy", "BbcDEeFIiJLlmOopQRSWw")
+        if parsed:
+            operands, options = parsed
+            parsed = (operands[1:], options) if operands else None
+    elif exe == "script":
+        parsed = _evaluator_options(
+            args, "aeqf", "cOITB",
+            frozenset({"--append", "--return", "--quiet", "--flush"}),
+            frozenset({"--command", "--log-out", "--log-in", "--log-timing", "--log-io"}),
+        )
+        if parsed:
+            options = parsed[1]
+            payload = options.get("-c", options.get("--command"))
+            return ([payload], False) if payload is not None else ([], True)
+    elif exe in {"su", "runuser", "sg", "parallel"}:
+        # Account/shell options differ between implementations. Preserve the
+        # whole-text guard for these forms until a dedicated adapter exists.
+        return [], True
+    if parsed is None:
+        return [], True
+    operands, _ = parsed
+    if not operands:
+        return [], True
+    # Every direct-exec argument is data, even when shlex.quote would omit its
+    # quotes (e.g. the word 'halt' in `screen echo halt`). The command name and
+    # shell -c payload will be recovered independently by the recursive parser.
+    payload = (
+        " ".join("'" + word.replace("'", "'\"'\"'") + "'" for word in operands)
+        if direct else " ".join(operands)
+    )
+    return [payload], False
+
+
+def _without_redirections(argv: list[str]) -> list[str]:
+    """Drop redirection operators and their targets, including here-strings
+    (``<<< word``), so only real operands remain."""
+    out: list[str] = []
+    i = 0
+    while i < len(argv):
+        after_redirect = _skip_redirection(argv, i)
+        if after_redirect is not None:
+            i = after_redirect
+            continue
+        out.append(argv[i])
+        i += 1
+    return out
+
+
+def _reads_code_from_stdin(argv: list[str]) -> bool:
+    """Whether a (prefix-stripped) command executes shell code read from stdin:
+    a shell with no ``-c`` string and no script operand, or with ``-s``
+    (``… | bash``, ``bash <<< 'cmd'``, ``sh -s <<EOF``), or ``at`` / ``batch``."""
+    if not argv:
+        return False
+    exe = _basename(argv[0])
+    if exe in _STDIN_CODE_READERS:
+        return True
+    # A "script file" that is really stdin, an fd or a process substitution
+    # (``source /dev/stdin``, ``bash /proc/self/fd/0``, ``. <(echo …)``).
+    if any(_is_stdin_script(p) for p in _executed_script_operands(argv)):
+        return True
+    if exe not in _SHELLS or _shell_code_args(argv):
+        return False
+    args = _without_redirections(argv[1:])
+    k = 0
+    while k < len(args):
+        tok = args[k]
+        if tok == "--":
+            k += 1
+            break
+        if not tok.startswith(("-", "+")):
+            break
+        if tok in {"-o", "-O", "+o", "+O", "--rcfile", "--init-file"}:
+            k += 2
+            continue
+        if not tok.startswith("--") and "s" in tok[1:]:
+            return True
+        k += 1
+    return k >= len(args)
+
+
+# Commands whose operands are files they write (besides redirections).
+_FILE_WRITERS = frozenset({"tee"})
+# Commands whose operands name the files they create (``cp a x.sh``).
+_FILE_COPIERS = frozenset({"cp", "mv", "ln", "install"})
+
+
+def _redirect_targets(tokens: list[str]) -> list[str]:
+    """Targets of the output redirections in ``tokens`` (``> x`` / ``>>x`` /
+    ``&> x``), quote-removed. fd duplications (``2>&1``) are not files."""
+    out: list[str] = []
+    for k, tok in enumerate(tokens):
+        redirect = redirection_token(tok)
+        if redirect is None:
+            continue
+        match = _REDIRECT_RE.match(redirect)
+        if match is None:
+            continue
+        operator = redirect[:len(redirect) - len(match.group(1))]
+        if ">" not in operator or operator.endswith("&"):
+            continue
+        target = match.group(1) or (tokens[k + 1] if k + 1 < len(tokens) else "")
+        if target:
+            out.append(target)
+    return out
+
+
+def _written_paths(tokens: list[str]) -> set[str]:
+    """Basenames of files a simple command writes: redirection targets and
+    ``tee`` / ``cp``-style operands."""
+    out = {_basename(t) for t in _redirect_targets(tokens)}
+    argv = strip_command_prefixes(tokens)
+    if argv and _basename(argv[0]) in _FILE_WRITERS:
+        out.update(_basename(t) for t in _without_redirections(argv[1:]) if not t.startswith("-"))
+    if argv and _basename(argv[0]) in _FILE_COPIERS:
+        operands = [t for t in _without_redirections(argv[1:]) if not t.startswith("-")]
+        out.update(_basename(t) for t in operands)  # sources too: ``mv x.sh dir/``
+    return out
+
+
+def _is_stdin_script(operand: str) -> bool:
+    return operand in {"-", "/dev/stdin"} or operand.startswith(
+        ("<(", "/dev/fd/", "/proc/self/fd/", "/proc/thread-self/fd/"),
+    )
+
+
+def _executed_script_operands(argv: list[str]) -> list[str]:
+    """Raw script operands a (prefix-stripped) command runs as shell code."""
+    if not argv:
+        return []
+    exe = _basename(argv[0])
+    if exe in {"source", "."}:
+        return _without_redirections(argv[1:])[:1]
+    if exe in _SHELLS and not _shell_code_args(argv):
+        args = _without_redirections(argv[1:])
+        k = 0
+        while k < len(args) and args[k].startswith(("-", "+")) and args[k] != "--":
+            k += 2 if args[k] in {"-o", "-O", "+o", "+O", "--rcfile", "--init-file"} else 1
+        if k < len(args) and args[k] == "--":
+            k += 1
+        return args[k:k + 1]
+    return []
+
+
+def _executed_script_paths(argv: list[str]) -> set[str]:
+    """Basenames of files a (prefix-stripped) command runs as shell code:
+    ``bash x.sh``, ``source x.sh`` / ``. x.sh`` and path execution ``./x.sh``.
+    Interpreters such as ``python3`` are deliberately absent: their scripts
+    are not shell, and writing ``gen.py`` then running it is ordinary work."""
+    if not argv:
+        return set()
+    operands = _executed_script_operands(argv)
+    if operands:
+        return {_basename(operands[0])}
+    if "/" in argv[0]:
+        return {_basename(argv[0])}
+    return set()
+
+
+# Commands that treat their quoted arguments, heredoc bodies and stdin as data.
+# Only these get the raw-screen blanking; any other command in the input keeps
+# the whole-text screen, so an unknown way of turning data back into code (a
+# runner such as ``systemd-run 'x'``, ``trap 'x' EXIT``, ``xargs``, ``alias``)
+# stays as strict as before instead of needing its own adapter. ``python*`` and
+# ``node`` are included on purpose: writing prose into ``gen.py`` and running it
+# is ordinary work, and an interpreter can build any string anyway -- the
+# sandbox, not this regex, bounds what its code does.
+_DATA_CONSUMERS = frozenset({
+    # output / text tools
+    "echo", "printf", "cat", "tac", "tee", "head", "tail", "wc", "sort", "uniq",
+    "cut", "tr", "paste", "nl", "fold", "fmt", "column", "rev", "grep", "egrep",
+    "fgrep", "rg", "ag", "diff", "cmp", "comm", "jq", "yq", "base64", "md5sum",
+    "sha1sum", "sha256sum", "sha512sum", "iconv", "sed",
+    # files and paths
+    "ls", "stat", "file", "du", "df", "mkdir", "rmdir", "touch", "cp", "mv",
+    "ln", "rm", "chmod", "chown", "find", "basename", "dirname", "realpath",
+    "readlink", "mktemp", "tar", "zip", "unzip", "gzip", "gunzip", "xz",
+    # document tooling
+    "pandoc", "pdftotext", "pdftoppm", "pdfinfo", "qpdf", "soffice", "libreoffice",
+    "xmllint", "pdflatex", "xelatex", "lualatex",
+    # guarded below: they can execute code through specific options
+    "git", "awk", "gawk", "mawk",
+    # service queries; shutdown operations are recognised separately
+    # (``_systemctl_requests_shutdown``), unit names are otherwise data
+    "systemctl",
+    # network retrieval (arguments are URLs / headers / bodies)
+    "curl", "wget",
+    # interpreters and package tooling (see above)
+    "python", "python3", "node", "pip", "pip3", "uv",
+    # builtins whose words are data
+    "cd", "pwd", "test", "[", "[[", "true", "false", ":", "export", "declare",
+    "typeset", "local", "readonly", "read", "set", "unset", "shopt", "exit",
+    "return", "sleep", "date", "wait",
+})
+# ``awk`` runs commands via ``system()``, ``| "cmd"`` / ``"cmd" | getline``.
+_AWK_EXEC_RE = re.compile(r"\bsystem\s*\(|\|\s*&?|\bgetline\b")
+
+
+def _sed_data_expression(expression: str) -> bool:
+    """Recognize a small non-executing sed grammar, never infer it from no 'e'.
+
+    Everything outside simple substitutions and print/delete/quit commands
+    falls back to the whole-text screen. In particular addresses, custom
+    delimiters and escaping must not conceal an execution command or
+    substitution flag.
+    """
+    expression = expression.strip()
+    expression = re.sub(r"^(?:\d+|\$)(?:,(?:\d+|\$))?!?", "", expression)
+    if expression in {"p", "P", "d", "D", "q", "Q", "="}:
+        return True
+    if len(expression) < 2 or expression[0] != "s":
+        return False
+    delimiter = expression[1]
+    if delimiter.isalnum() or delimiter.isspace() or delimiter == "\\":
+        return False
+    i = 2
+    for _ in range(2):  # pattern and replacement, each closed by the delimiter
+        while i < len(expression):
+            char = expression[i]
+            if char == "\n":
+                return False
+            if char == "\\":
+                if i + 1 >= len(expression) or expression[i + 1] == "\n":
+                    return False
+                i += 2
+                continue
+            i += 1
+            if char == delimiter:
+                break
+        else:
+            return False
+    return re.fullmatch(r"[gIpMm0-9]*", expression[i:]) is not None
+
+
+def _sed_treats_words_as_data(args: list[str]) -> bool:
+    expressions: list[str] = []
+    operands: list[str] = []
+    i = 0
+    options = True
+    while i < len(args):
+        token = args[i]
+        if options and token == "--":
+            options = False
+        elif options and token.startswith("--expression="):
+            expressions.append(token.partition("=")[2])
+        elif options and token == "--expression":
+            i += 1
+            if i >= len(args):
+                return False
+            expressions.append(args[i])
+        elif options and token.startswith("--"):
+            if token not in {"--quiet", "--silent", "--regexp-extended", "--sandbox",
+                             "--unbuffered", "--null-data", "--posix", "--in-place"} and not (
+                token.startswith("--in-place=")
+            ):
+                return False
+        elif options and token.startswith("-") and token != "-":
+            j = 1
+            while j < len(token):
+                flag = token[j]
+                if flag == "e":
+                    expr = token[j + 1:]
+                    if not expr:
+                        i += 1
+                        if i >= len(args):
+                            return False
+                        expr = args[i]
+                    expressions.append(expr)
+                    break
+                if flag == "i":
+                    break  # the remainder is the optional backup suffix
+                if flag not in "nEruzb":
+                    return False  # includes -f: unseen script files aren't data
+                j += 1
+        else:
+            operands.append(token)
+        i += 1
+    if not expressions:
+        expressions = operands[:1]
+    return bool(expressions) and all(_sed_data_expression(expr) for expr in expressions)
+
+
+def _tar_treats_words_as_data(args: list[str]) -> bool:
+    """Only ordinary archive options may opt out of whole-text screening.
+
+    Unknown/abbreviated options retain the raw guard. This includes checkpoint
+    actions, external compressors, remote shell commands and --to-command.
+    """
+    # tar also accepts traditional option words such as `tar czf archive ...`.
+    if args and args[0] and not args[0].startswith("-"):
+        if all(c in "ctxrvuzjpJOfCThv" for c in args[0]):
+            args = ["-" + args[0], *args[1:]]
+        else:
+            return False
+    while args:
+        parsed = _evaluator_options(
+            args, "ctxrvuzjpJOh", "fCT",
+            frozenset({"--create", "--extract", "--get", "--list", "--append", "--update",
+                       "--verbose", "--gzip", "--bzip2", "--xz", "--zstd", "--no-recursion",
+                       "--dereference", "--numeric-owner", "--null"}),
+            frozenset({"--file", "--directory", "--files-from", "--exclude"}),
+        )
+        if parsed is None:
+            return False
+        operands, _ = parsed
+        if "--" in args[:len(args) - len(operands)]:
+            return True
+        if not operands:
+            return True
+        args = operands[1:]  # GNU tar also accepts options after file operands
+    return True
+
+
+# Bash evaluates array subscripts arithmetically, and that evaluation runs any
+# ``$(...)`` inside -- even in a single-quoted word: ``[[ 'a[$(cmd)]' -eq 1 ]]``,
+# ``printf -v 'x[$(cmd)]'``, ``read 'x[$(cmd)]'``, ``declare -i v='a[$(cmd)]'``.
+_ARITH_SUBSCRIPT_EXEC = r"\$\(|`"
+# Options through which an otherwise data-only tool runs a program or code.
+# Searched in each argument; a hit keeps the whole-text screen. Every entry of
+# _DATA_CONSUMERS must be classified in tests/test_bash_policy_consumer_audit.py.
+_CONSUMER_EXEC_OPTIONS: dict[str, re.Pattern[str]] = {
+    tool: re.compile(pattern) for tool, pattern in {
+        "[[": _ARITH_SUBSCRIPT_EXEC,
+        "printf": _ARITH_SUBSCRIPT_EXEC,
+        "read": _ARITH_SUBSCRIPT_EXEC,
+        "declare": _ARITH_SUBSCRIPT_EXEC,
+        "typeset": _ARITH_SUBSCRIPT_EXEC,
+        "local": _ARITH_SUBSCRIPT_EXEC,
+        "readonly": _ARITH_SUBSCRIPT_EXEC,
+        "export": _ARITH_SUBSCRIPT_EXEC,
+        "ag": r"\A--pager",
+        "pandoc": r"\A(?:-F|--filter|-L|--lua-filter|--pdf-engine)",
+        "pdflatex": r"\A--?(?:shell-escape|enable-write18)\Z",
+        "xelatex": r"\A--?(?:shell-escape|enable-write18)\Z",
+        "lualatex": r"\A--?(?:shell-escape|enable-write18)\Z",
+        "rg": r"\A--pre(?:=|\Z)",
+        "sort": r"\A--compress-program",
+        "zip": r"\A(?:-TT|--unzip-command)",
+        "wget": r"\A(?:--use-askpass|-e|--execute)",
+        "soffice": r"\A(?:macro:|vnd\.sun\.star\.script:)",
+        "libreoffice": r"\A(?:macro:|vnd\.sun\.star\.script:)",
+        "xmllint": r"\A--shell\Z",
+    }.items()
+}
+# git: subcommands that only read/write repository data, and the options that
+# still hand git a program to run (hooks and config-driven drivers aside).
+_GIT_DATA_SUBCOMMANDS = frozenset({
+    "add", "commit", "status", "log", "diff", "show", "init", "rm", "mv",
+    "restore", "checkout", "switch", "branch", "tag", "stash", "rev-parse",
+    "ls-files", "blame", "reset", "remote", "merge", "fetch", "pull", "push",
+    "clone", "describe", "shortlog",
+})
+_GIT_EXEC_OPTIONS = re.compile(
+    r"\A(?:-u\Z|--upload-pack|--receive-pack|--exec|-x\Z|--ext-diff|-O|"
+    r"--open-files-in-pager|--extcmd|--tool|-c|--config-env)"
+)
+_GIT_GLOBAL_VALUE_OPTIONS = frozenset({"-C", "--git-dir", "--work-tree", "--namespace"})
+# uv: project/package management only; ``uv run`` / ``uv tool run`` execute.
+_UV_DATA_SUBCOMMANDS = frozenset({
+    "pip", "add", "remove", "sync", "lock", "venv", "init", "tree", "version", "python",
+})
+# Environment variables whose value is a command or code another program runs
+# (``GIT_SSH_COMMAND='x' git fetch``, ``export PAGER='x'``).
+_EXEC_ENV_ASSIGN_RE = re.compile(
+    r"\A(?:GIT_[A-Z_]*|PAGER|MANPAGER|EDITOR|VISUAL|SSH_ASKPASS|BROWSER|SHELL|"
+    r"BASH_ENV|ENV|PROMPT_COMMAND|LD_PRELOAD|PYTHONSTARTUP|NODE_OPTIONS|PERL5OPT|"
+    r"[A-Z_]*_(?:COMMAND|CMD|EDITOR|PAGER))="
+)
+
+
+def _git_treats_words_as_data(args: list[str]) -> bool:
+    i = 0
+    while i < len(args) and args[i].startswith("-"):
+        if _GIT_EXEC_OPTIONS.match(args[i]):
+            return False
+        i += 2 if args[i] in _GIT_GLOBAL_VALUE_OPTIONS else 1
+    if i >= len(args) or args[i] not in _GIT_DATA_SUBCOMMANDS:
+        return False
+    return not any(_GIT_EXEC_OPTIONS.match(t) for t in args[i + 1:])
+
+
+def _is_dynamic_name(token: str) -> bool:
+    """The command name comes from an expansion (``$x`` / ``$(...)``)."""
+    return (
+        "$" in token or "`" in token
+        or _SUBSTITUTION_SENTINEL in token or _ARITHMETIC_SENTINEL in token
+    )
+
+
+def _treats_words_as_data(argv: list[str]) -> bool:
+    """Whether blanking this (prefix-stripped) command's quoted words and
+    heredoc bodies is safe: a known data consumer, used without a code flag."""
+    if not argv:
+        return True  # assignments / redirections only
+    exe = _basename(argv[0])
+    if exe not in _DATA_CONSUMERS:
+        return False
+    args = _without_redirections(argv[1:])
+    if exe == "sed":
+        return _sed_treats_words_as_data(args)
+    if exe == "tar":
+        return _tar_treats_words_as_data(args)
+    if exe in {"awk", "gawk", "mawk"}:
+        return not any(_AWK_EXEC_RE.search(t) for t in args)
+    if exe == "git":
+        return _git_treats_words_as_data(args)
+    if exe == "uv":
+        operands = [t for t in args if not t.startswith("-")]
+        return bool(operands) and operands[0] in _UV_DATA_SUBCOMMANDS
+    guard = _CONSUMER_EXEC_OPTIONS.get(exe)
+    return guard is None or not any(guard.search(t) for t in args)
+
+
+def _raw_screen_views(command: str, depth: int = 0, root: str | None = None) -> list[str]:
+    """Texts the Layer-1 raw regexes should see: only what the shell executes.
+
+    Heredoc bodies fed to a non-shell and the contents of quoted arguments are
+    data (``cat > a.md <<'MD'`` / ``echo "market halt"`` /
+    ``python3 -c "print('reboot')"``), so they are blanked. Code the shell does
+    run is recursed into: ``$(...)`` / backticks (also inside double quotes and
+    unquoted heredoc bodies), ``bash -c`` / ``-lc`` strings, ``eval`` and
+    heredocs consumed by a shell. Past the nesting limit, or when a segment
+    cannot be tokenised, the unblanked text is screened (fail-closed).
+
+    Blanking applies only when every command is a known data consumer or a form
+    whose code is recovered exactly (shell ``-c``, evaluator adapters,
+    ``find -exec``, a shell given a script file). An unknown command or a
+    dynamic command name (``$x``, ``$(...)``) at any depth screens ``root``, the
+    whole original command.
+    """
+    command = _normalize_ansi_c_quotes(command)
+    root = _strip_comments(command) if root is None else root
+    if depth > _MAX_NEST:
+        return [_strip_comments(command)]
+    stripped, bodies = _strip_heredoc_bodies(command)
+    stripped = _strip_comments(stripped)
+    views = [_blank_quoted(stripped)]
+    nested = _extract_nested_shell(stripped) + bodies
+    written: set[str] = set()
+    executed: set[str] = set()
+    for seg in _split_top_level(stripped):
+        try:
+            tokens = tokenize_shell_segment(_mask_nested_shell(seg))
+        except ValueError:
+            views.append(seg)
+            continue
+        keyword = _leading_shell_keyword(seg)
+        if tokens and keyword in _CONTROL_LEADERS and tokens[0] == keyword:
+            tokens[0] = _SHELL_SYNTAX_TOKEN
+        shell_code = _shell_code_args(tokens)
+        nested.extend(shell_code)
+        evaluator_code, evaluator_fallback = _evaluator_payloads(tokens)
+        nested.extend(evaluator_code)
+        env_code = _env_split_payloads(tokens)
+        nested.extend(env_code)
+        if evaluator_fallback:
+            views.append(seg)
+        resolved = strip_command_prefixes(tokens)
+        for payload in _find_exec_payloads(resolved):
+            nested.append(shlex.join(payload))
+        if any(_EXEC_ENV_ASSIGN_RE.match(t) for t in tokens):
+            views.append(root)
+        # A dynamic command name, or a command not known to treat its words as
+        # data, gets the whole original text screened.
+        if (resolved and _is_dynamic_name(resolved[0])) or not (
+            _treats_words_as_data(resolved)
+            or shell_code
+            or evaluator_code
+            or env_code
+            # Path execution is useful for write/run correlation, but an
+            # arbitrary /usr/bin/tool is not thereby a known data consumer.
+            or _executed_script_operands(resolved)
+        ) or (tokens and _basename(tokens[0]) == "xargs" and not resolved):
+            views.append(root)
+        if _reads_code_from_stdin(resolved):
+            # Whatever feeds this command's stdin -- a pipe, a here-string or a
+            # heredoc, quoted or not -- is code, and it can come from anywhere
+            # in the command. Screen the unblanked text.
+            views.append(_strip_comments(command))
+        written |= _written_paths(tokens)
+        executed |= _executed_script_paths(resolved)
+        # Quote removal happens before the shell opens a redirect target, so
+        # ``> "/dev/sda"`` must be screened by its real spelling.
+        views.extend("> " + target for target in _redirect_targets(tokens))
+        if resolved:
+            # Quote removal happens before the shell looks the command up, so
+            # ``"halt"`` / ``m''kfs`` must be screened by their real spelling.
+            # The name is a command, not data; ``dd`` also needs its operands
+            # (``of="/dev/sda"``).
+            exe = _basename(resolved[0])
+            views.append(" ".join([exe, *resolved[1:]]) if exe == "dd" else exe)
+            if exe == "systemctl" and _systemctl_requests_shutdown(
+                _without_redirections(resolved[1:]),
+            ):
+                views.append("shutdown")
+    if written & executed:
+        # A file this command writes and then runs as a shell script: whatever
+        # was written into it (echoed text, a heredoc body) is code. Matching
+        # by basename is deliberately loose -- it only errs towards denying.
+        views.append(_strip_comments(command))
+    for sub in nested:
+        if sub.strip():
+            views.extend(_raw_screen_views(sub, depth + 1, root))
+    return views
+
+
+# ``DROP TABLE`` keeps screening the whole text: SQL reaches its engine through
+# quoted arguments and heredocs (``psql -c "…"`` / ``sqlite3 db <<SQL``), so
+# blanking data would silently drop that guard.
+_WHOLE_TEXT_DENY_PATTERNS = frozenset({r"\bDROP\s+TABLE\b"})
+
+
+def _env_split_payloads(tokens: list[str]) -> list[str]:
+    """Command strings ``env -S`` / ``--split-string`` splits and RUNS.
+
+    ``env -S 'sudo id'`` executes ``sudo id``, but as one shell word it looked
+    like a single argument and the real command was never assessed. The
+    payload is returned as an ``env`` command line with the remaining words
+    appended, as env runs it.
+    """
+    if _is_command_lookup(tokens):
+        return []
+    for k, tok in enumerate(tokens):
+        # Only an env in command position can run its split string. A word in
+        # ``echo env -S 'sudo id'`` is data, and words after an earlier -S are
+        # arguments to the command that env starts.
+        if _basename(tok) != "env" or _resolve_exe(tokens[:k])[0] is not None:
+            continue
+        i = k + 1
+        while i < len(tokens):
+            t = tokens[i]
+            payload: str | None = None
+            if t in ("-S", "--split-string"):
+                if i + 1 >= len(tokens):
+                    break
+                payload, i = tokens[i + 1], i + 2
+            elif t.startswith("--split-string="):
+                payload, i = t.partition("=")[2], i + 1
+            elif t.startswith("-") and not t.startswith("--") and "S" in t[1:]:
+                rest = t[t.index("S", 1) + 1:]
+                if rest:
+                    payload, i = rest, i + 1
+                elif i + 1 < len(tokens):
+                    payload, i = tokens[i + 1], i + 2
+                else:
+                    break
+            if payload is not None:
+                # Re-prefixed with ``env``: the split string may itself start
+                # with env options (``env -S '-i sudo id'``, the shebang idiom
+                # ``env -S -i python3``), which only env's own option skipping
+                # resolves to the real executable.
+                return [" ".join(["env", payload, *(shlex.quote(w) for w in tokens[i:])])]
+            if t == "--" or not t.startswith("-"):
+                break
+            i += 2 if t in _WRAPPER_OPTION_VALUES["env"] else 1
+    return []
+
+
+def _dynamic_env_split_reason(commands: list[list[str]]) -> str | None:
+    """Refuse env -S when expansion determines the executable it will start.
+
+    env expands ``${VAR}`` inside its split string after the shell has passed
+    the argument to it. Without the resulting value, Layer 1.5 cannot tell
+    whether that executable belongs to an always-denied group.
+    """
+    for argv in commands:
+        for payload in _env_split_payloads(argv):
+            try:
+                words = tokenize_shell_segment(payload)
+            except ValueError:
+                return "Cannot safely inspect the executable in `env -S`."
+            exe, _ = _resolve_exe(words)
+            if exe is not None and _is_dynamic_name(exe):
+                return (
+                    "Refuses `env -S` with a dynamically generated executable "
+                    "name; use a fixed command name instead."
+                )
+    return None
+
+
+def _unknown_evaluator_words(argv: list[str]) -> list[str]:
+    """Words of an evaluator whose argument form is not recognised
+    (``su``, ``parallel``, an unknown ``tmux`` subcommand …).
+
+    Its payload cannot be separated from its options, so the always-denied
+    group check looks at every word instead of guessing: ``parallel ::: 'sudo
+    id'`` is refused rather than allowed.
+    """
+    code, fallback = _evaluator_payloads(argv)
+    if not fallback or code:
+        return []
+    words: list[str] = []
+    for tok in argv:
+        try:
+            words.extend(shlex.split(tok))
+        except ValueError:
+            words.extend(tok.split())
+    return words
+
+
+def _is_command_lookup(argv: list[str]) -> bool:
+    """``command -v X`` / ``command -V X`` asks whether ``X`` exists; it does
+    not run it."""
+    argv = [t for t in argv if t != _SHELL_SYNTAX_TOKEN and not _ASSIGN_RE.match(t)]
+    return (
+        len(argv) > 1 and _basename(argv[0]) == "command"
+        and argv[1] in ("-v", "-V")
+    )
+
+
+def _argv_group_deny(commands: list[list[str]]) -> tuple[str, str] | None:
+    """Layer 1.5 — ``(group, reason)`` for a command whose executable is in one
+    of the always-denied groups (see ``_ALWAYS_DENIED_GROUPS``).
+
+    Unlike :func:`_assess_allowlist` this runs in EVERY mode, which is the
+    point: under the default ``off`` mode a plain ``sudo …`` / ``ssh host '…'``
+    / ``pkill -f python3`` used to be assessed ``allow``.
+
+    Resolution goes through :func:`_resolve_exe`, so wrappers are unwrapped
+    (``env ssh``, ``timeout 5 sudo``), and the argv list handed in has already
+    been flattened by :func:`_parse_commands` — nested ``$(...)``, ``bash -c``
+    bodies and heredoc bodies are separate entries here (bounded by
+    ``_MAX_NEST``).
+    """
+    for argv in commands:
+        if _is_command_lookup(argv):
+            continue
+        for word in _unknown_evaluator_words(argv):
+            base = _basename(word)
+            if base in _PRIV_ESC:
+                return "priv_esc", _DENY_GROUP_PRIV_ESC[base]
+            hit = _ALWAYS_DENIED_BINARIES.get(base)
+            if hit is not None:
+                group, reason = hit
+                return group, f"`{base}`: {reason}"
+        exe, rest = _resolve_exe(argv)
+        if exe is None:
+            continue
+        if exe == "__DENY__":
+            # Privilege-escalation prefix, recognised during resolution.
+            reason = rest[0] if rest else _DENY_GROUP_PRIV_ESC["sudo"]
+            return "priv_esc", reason
+        hit = _ALWAYS_DENIED_BINARIES.get(exe)
+        if hit is not None:
+            group, reason = hit
+            return group, f"`{exe}`: {reason}"
+    return None
+
+
 def _parse_commands(command: str, depth: int = 0) -> list[list[str]]:
     """Parse into a list of argv lists (one per simple command), recursively
     including commands nested in ``$(...)`` / backticks, in the code argument of
-    ``eval`` / ``bash -c``, in ``find -exec`` payloads, and in shell heredoc
-    bodies. Raises :class:`_ParseError` when a top-level segment can't be
-    tokenised (unbalanced quotes)."""
+    ``eval`` / ``bash -c`` (also ``-lc``), in ``find -exec`` payloads, and in
+    shell heredoc bodies. Raises :class:`_ParseError` when a top-level segment
+    can't be tokenised (unbalanced quotes)."""
+    command = _normalize_ansi_c_quotes(command)
     stripped, heredoc_bodies = _strip_heredoc_bodies(command)
     # After heredoc bodies are out of the way (their ``#`` lines are data/code,
     # not shell comments) drop the shell's own comments.
@@ -878,7 +2197,10 @@ def _parse_commands(command: str, depth: int = 0) -> list[list[str]]:
     argvs: list[list[str]] = []
     for seg in _split_top_level(stripped):
         try:
-            tokens = tokenize_shell_segment(seg)
+            # Nested substitutions are assessed recursively below; mask them
+            # from the outer argv so their spaces/options cannot create phantom
+            # executables (``x=$(nginx -V)`` would otherwise yield ``-V)``).
+            tokens = tokenize_shell_segment(_mask_nested_shell(seg))
         except ValueError as exc:
             raise _ParseError(str(exc)) from exc
         if tokens:
@@ -901,19 +2223,16 @@ def _parse_commands(command: str, depth: int = 0) -> list[list[str]]:
 
     nested = _extract_nested_shell(stripped) + list(heredoc_bodies)
     for raw_argv in list(argvs):
-        # Unwrap prefixes first so ``env bash -c …`` / ``timeout 10 bash -c …`` /
-        # ``xargs sh -c …`` are recognised as nested shells (not just bare
-        # ``bash``/``eval`` at argv[0]).
-        argv = strip_command_prefixes(raw_argv)
-        if not argv:
-            continue
-        base = _basename(argv[0])
-        if base == "eval" and len(argv) > 1:
-            nested.append(" ".join(argv[1:]))
-        elif base in _SHELLS and "-c" in argv:
-            k = argv.index("-c")
-            if k + 1 < len(argv):
-                nested.append(argv[k + 1])
+        # ``_shell_code_args`` unwraps prefixes first, so ``env bash -c …`` /
+        # ``timeout 10 bash -lc …`` / ``xargs sh -c …`` are recognised as
+        # nested shells (not just bare ``bash``/``eval`` at argv[0]).
+        nested.extend(_shell_code_args(raw_argv))
+        # Code other runners execute: ``watch 'x'`` / ``script -c 'x'`` /
+        # ``tmux new 'x'`` / ``ssh host 'x'``, and ``env -S 'x'``. The word
+        # screens already recursed into these; without this the group check
+        # (Layer 1.5) and the allowlist never saw ``watch 'sudo id'``.
+        nested.extend(_evaluator_payloads(raw_argv)[0])
+        nested.extend(_env_split_payloads(raw_argv))
     for sub in nested:
         if sub.strip():
             # Unparseable nested code — the outer parse already recorded it.
@@ -945,7 +2264,7 @@ def _resolve_exe(argv: list[str]) -> tuple[str | None, list[str]]:
         if base in _WRAPPERS:
             # skip the wrapper's option flags AND their separate values (so
             # ``nice -n 10 rm`` / ``timeout -s 9 10 bash`` resolve past ``10``).
-            i = _skip_wrapper_args(argv, i + 1)
+            i = _skip_wrapper_args(argv, i + 1, wrapper=base)
             continue
         if tok == _SHELL_SYNTAX_TOKEN:
             i += 1
@@ -983,6 +2302,17 @@ def _assess_allowlist(commands: list[list[str]], *, mode: str) -> BashCommandAss
                     "`python3 <<'PY' ... PY` heredoc."
                 ))
             continue
+        if _SUBSTITUTION_SENTINEL in exe or _ARITHMETIC_SENTINEL in exe:
+            reason = (
+                "A shell expansion appears in executable position, so the "
+                "command name is generated dynamically and cannot be checked "
+                "against the allowed-command list. Invoke a fixed allowlisted "
+                "executable instead."
+            )
+            if mode == "enforce":
+                return BashCommandAssessment(level="deny", reason=reason)
+            _raise("audit", f"[allowlist:warn] {reason}")
+            continue
         # Not on the allowlist.
         # Name every allowed category, `pip` included. The message used to omit
         # package tooling even though pip has been allowlisted since the layer
@@ -1016,12 +2346,23 @@ def _assess_allowlist(commands: list[list[str]], *, mode: str) -> BashCommandAss
 # ── Public entry point ──────────────────────────────────────────────────
 
 
-def assess_bash_command(command: str, *, mode: str | None = None) -> BashCommandAssessment:
+def assess_bash_command(
+    command: str, *, mode: str | None = None, interactive: bool = False,
+) -> BashCommandAssessment:
     """Classify a bash command into ``allow`` / ``audit`` / ``confirm`` / ``deny``.
 
     ``mode`` overrides the resolved policy mode (see :func:`resolve_mode`); left
     ``None`` it is resolved from env / contextvar / config / scope. Regardless
-    of mode, the Layer-1 hard denylist always runs first.
+    of mode, the Layer-1 hard denylist always runs first and the always-denied
+    groups (privilege escalation, remote/exfil clients, signal senders) run
+    right after it (Layer 1.5).
+
+    ``interactive`` is for a caller that puts every non-``allow`` verdict in
+    front of a human (the local coding CLI). A Layer-1.5 group hit is then
+    ``confirm`` (with :attr:`BashCommandAssessment.group` set) instead of
+    ``deny``, so the human decides; the caller must not let auto-approval or a
+    saved rule answer it. Layer 1 stays ``deny`` either way. Only calling code
+    can pass this — no config, profile or request field reaches it.
     """
     normalized = command.strip()
     if not normalized:
@@ -1033,9 +2374,15 @@ def assess_bash_command(command: str, *, mode: str | None = None) -> BashCommand
     # Raw screens must see only shell code. In particular, a protected-looking
     # redirect in ``# > /etc/passwd`` is inert comment text, not an attempted
     # write. The argv parser below performs the same stripping independently.
-    executable_text = _strip_comments(normalized)
+    #
+    # The same holds for data: heredoc bodies and quoted arguments routinely
+    # carry prose ("an exchange halt applies"), so the word screens only see
+    # the text the shell executes (see ``_raw_screen_views``).
+    executable_text = _strip_comments(_normalize_ansi_c_quotes(normalized))
+    screen_text = "\n".join(_raw_screen_views(normalized))
     for pattern, reason in _DENY_PATTERNS:
-        if re.search(pattern, executable_text, re.IGNORECASE):
+        text = executable_text if pattern in _WHOLE_TEXT_DENY_PATTERNS else screen_text
+        if re.search(pattern, text, re.IGNORECASE):
             return BashCommandAssessment(level="deny", reason=reason)
 
     for match in _REDIRECT_PROTECTED_RE.finditer(executable_text):
@@ -1068,6 +2415,18 @@ def assess_bash_command(command: str, *, mode: str | None = None) -> BashCommand
         argv_reason = _argv_hard_deny(commands)
         if argv_reason:
             return BashCommandAssessment(level="deny", reason=argv_reason)
+
+        env_reason = _dynamic_env_split_reason(commands)
+        if env_reason:
+            return BashCommandAssessment(level="deny", reason=env_reason)
+
+        # ── Layer 1.5: always-denied groups (every mode) ──
+        group_hit = _argv_group_deny(commands)
+        if group_hit:
+            group, reason = group_hit
+            return BashCommandAssessment(
+                level="confirm" if interactive else "deny", reason=reason, group=group,
+            )
 
     # ── off mode: legacy denylist-only behaviour ──
     if effective_mode == "off":
