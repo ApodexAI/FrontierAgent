@@ -16,10 +16,10 @@
   <a href="https://x.com/Apodex_AI"><img alt="X" src="https://img.shields.io/badge/X-@Apodex__AI-000000?logo=x&logoColor=white"/></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/License-Apache_2.0-blue"/></a>
 </div>
+<br>
 <p align="center">
   <a href="https://trendshift.io/repositories/182526?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-182526" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/182526/daily?language=Python" alt="ApodexAI%2FFrontierAgent | Trendshift" width="250" height="55"/></a>
 </p>
-<br>
 <p align="center">
   <b><a href="https://www.apodex.com/blog/apodex-1.1-scaling-agentic-intelligence-for-complex-work">Tech Blog</a></b> ·
   <b><a href="https://arxiv.org/abs/2608.23283">Tech Report</a></b>
