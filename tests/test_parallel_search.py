@@ -303,3 +303,73 @@ def test_react_profile_loader_keeps_both_search_implementations_on_parallel(
         selected = next(tool for tool in tools if tool.name == "web_search")
         assert selected is expected
         assert parallel.selected_search_provider() == "parallel"
+
+
+@pytest.mark.parametrize("implementation", ["original", "aligned"])
+@pytest.mark.parametrize("scenario", ["filtered", "duplicates", "multiple_queries"])
+@pytest.mark.asyncio
+async def test_parallel_limits_displayed_results_after_filtering_and_deduplication(
+    monkeypatch: pytest.MonkeyPatch, implementation: str, scenario: str,
+) -> None:
+    def row(title: str, url: str) -> dict[str, Any]:
+        return {"title": title, "url": url, "excerpts": ["Useful text."],
+                "publish_date": "2026-09-29"}
+
+    first = row("First useful", "https://example.com/first")
+    second = row("Second useful", "https://example.com/second")
+    extra = row("Over limit", "https://example.com/extra")
+    blocked_url = (
+        "https://youtube.com/watch/1" if implementation == "original"
+        else "https://huggingface.co/datasets/example"
+    )
+    blocked = row("Blocked result", blocked_url)
+    if scenario == "filtered":
+        queries, limit = ["first"], 1
+        responses = {"first": [blocked, first, extra]}
+        expected = ["First useful"]
+    elif scenario == "duplicates":
+        queries, limit = ["first"], 2
+        responses = {"first": [first, first, second, extra]}
+        expected = ["First useful", "Second useful"]
+    else:
+        queries, limit = ["first", "second"], 1
+        responses = {"first": [first, second], "second": [first, blocked, second, extra]}
+        expected = ["First useful", "Second useful"]
+
+    class ResultsClient(_FakeClient):
+        async def post(self, url, *, json, headers):
+            if json.get("method") == "tools/call":
+                query = json["params"]["arguments"]["objective"]
+                return _Response({
+                    "jsonrpc": "2.0", "id": json["id"],
+                    "result": {"structuredContent": {"results": responses[query]}},
+                })
+            return await super().post(url, json=json, headers=headers)
+
+    _FakeClient.calls = []
+    monkeypatch.setattr(parallel.httpx, "AsyncClient", ResultsClient)
+    monkeypatch.setenv("WEB_SEARCH_PROVIDER", "parallel")
+    if implementation == "original":
+        module = importlib.import_module("plugins.tools.web_search")
+        output = await module.web_search.ainvoke({"q": queries, "num_results": limit})
+    else:
+        module = importlib.import_module("plugins.tools.web_search_aligned")
+        output = await module.web_search_aligned.ainvoke({"q": queries, "num": limit})
+        assert output.count("Date: 2026-09-29") == len(expected)
+
+    assert output.count("URL: https://") == len(expected)
+    for title in expected:
+        assert output.count(title) == 1
+    assert "Blocked result" not in output
+    assert "Over limit" not in output
+
+
+@pytest.mark.parametrize("field", ["publish_date", "published_date", "date"])
+@pytest.mark.parametrize("structured", [True, False])
+def test_parallel_normalises_publication_dates(field: str, structured: bool) -> None:
+    payload = {"results": [{"url": "https://example.com", field: "2026-09-29"}]}
+    result = (
+        {"structuredContent": payload} if structured
+        else {"content": [{"type": "text", "text": json.dumps(payload)}]}
+    )
+    assert parallel._normalise_result(result)["organic"][0]["date"] == "2026-09-29"

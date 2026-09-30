@@ -180,7 +180,7 @@ def _normalise_result(result: dict[str, Any]) -> dict[str, Any]:
             "title": str(item.get("title") or ""),
             "link": str(link),
             "snippet": str(snippet),
-            "date": str(item.get("published_date") or item.get("date") or ""),
+            "date": str(item.get("publish_date") or item.get("published_date") or item.get("date") or ""),
         })
     if organic:
         return {"organic": organic}
@@ -203,6 +203,8 @@ async def parallel_search_batch(
     limit of ten results per query; larger counts are rejected because this
     tool has no per-call result-count argument. The selected provider never
     falls back to Serper on a transport, rate-limit, or tool error.
+    Return all candidates so callers can limit results after display filtering
+    and URL deduplication.
     """
     if gl != "us" or hl != "en" or tbs:
         return (
@@ -309,9 +311,6 @@ async def parallel_search_batch(
                 if tool_result.get("isError"):
                     raise ValueError("web_search returned an error")
                 normalised = _normalise_result(tool_result)
-                normalised["organic"] = (normalised.get("organic") or [])[:
-                    max(1, int(num_results))
-                ]
                 record_api_request("parallel")
                 return normalised
 

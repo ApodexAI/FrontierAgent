@@ -480,7 +480,12 @@ async def web_search(
         if len(datas) == 1:
             return maybe_overflow(
                 "web_search",
-                _format_results(datas[0], max_organic=num_results),
+                _format_results(
+                    {**datas[0], "organic": _dedupe_display_organic(
+                        datas[0].get("organic") or [], set(), num_results,
+                    )},
+                    max_organic=num_results,
+                ),
             )
         return maybe_overflow(
             "web_search",

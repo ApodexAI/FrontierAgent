@@ -304,6 +304,7 @@ async def web_search_aligned(
         merged: list[dict] = []
         seen_urls: set[str] = set()
         for data in datas:
+            displayed = 0
             for item in data.get("organic", []):
                 link = item.get("link", "")
                 if _is_banned_url(link) or is_snippet_blocked_result(item):
@@ -313,6 +314,9 @@ async def web_search_aligned(
                 if link:
                     seen_urls.add(link)
                 merged.append(item)
+                displayed += 1
+                if displayed >= result_limit:
+                    break
         if not merged:
             return "No search results found."
         return _format_results_plaintext(merged)
