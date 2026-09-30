@@ -34,6 +34,11 @@ Compose writes session records and deliverables to `.apodex/runs/<session-id>/`.
 Its named state volume is retained for legacy sessions. Attached inputs are
 copied into a separate volume that tools can only read. See
 [run artifacts and timestamps](../run-artifacts.md) for the on-disk layout.
+The agent receives `.env` through its process environment; Compose masks the
+on-disk file inside `/project` so model commands cannot read it. The SGLang and
+Transformers overrides also mask their respective env files. Keep any custom
+credential file outside the mounted project, since project files are available
+to the agent by design.
 
 The convenience helper wraps the same thing:
 
@@ -63,6 +68,7 @@ docker run --rm -it \
   --env-file .env \
   -e APODEX_IN_CONTAINER=1 \
   -e SANDBOX_BACKEND=container \
+  -e FRONTIER_AGENT_REQUIRE_TOOL_USER=1 \
   -e FRONTIER_AGENT_WORKSPACE_DIR=/workspace \
   -e APODEX_RUNS_ROOT=/apodex-runs \
   -e APODEX_RUNS_ROOT_PINNED=1 \
@@ -71,6 +77,7 @@ docker run --rm -it \
   -e APODEX_INPUT_STAGING_ROOT=/apodex-inputs \
   -e FRONTIER_AGENT_INPUTS_ROOT=/inputs \
   -v "$(pwd):/workspace" \
+  -v /dev/null:/workspace/.env:ro \
   -v "$(pwd)/.apodex/runs:/apodex-runs" \
   -v frontier-agent-inputs:/apodex-inputs \
   -v frontier-agent-inputs:/inputs:ro \

@@ -105,9 +105,11 @@ def test_unknown_mode_does_not_silently_become_off(monkeypatch, caplog) -> None:
     monkeypatch.setattr(policy, "_scope_mode", lambda: "")
     outer = set_policy_mode("enforce")
     try:
-        inner = set_policy_mode("enfoce")
+        invalid_mode = "enfoce-secret-token"
+        inner = set_policy_mode(invalid_mode)
         try:
-            assert "enfoce" in caplog.text
+            assert "ignoring unknown bash policy mode" in caplog.text
+            assert invalid_mode not in caplog.text
             assert resolve_mode() == "off"  # typo → default, but loudly
         finally:
             reset_policy_mode(inner)
