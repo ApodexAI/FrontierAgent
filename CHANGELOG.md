@@ -12,7 +12,7 @@ Initial open-source release of FrontierAgent.
 ### Changed
 
 - **Runtime engine moved to [`apodex-agent-core`](https://pypi.org/project/apodex-agent-core/)
-  (pinned `==0.12.0`).** The agent loop, loop contracts, tool execution,
+  (pinned `==0.12.2`).** The agent loop, loop contracts, tool execution,
   compaction, observers, AgentBus, DAG and providers now come from `agent_core`;
   `frontier_agent.*` keeps its import paths as `sys.modules` aliases or thin
   adapters, so workflows, apodex and benchmarks are unchanged. Product policy is
