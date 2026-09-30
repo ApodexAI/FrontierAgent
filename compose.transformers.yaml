@@ -44,6 +44,8 @@ services:
     restart: unless-stopped
 
   agent:
+    volumes:
+      - /dev/null:/project/.env.transformers:ro
     depends_on:
       model:
         condition: service_healthy
