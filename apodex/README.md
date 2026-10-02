@@ -88,7 +88,9 @@ cp .env.example .env
 #   OPENAI_API_KEY=...
 #   OPENAI_BASE_URL=https://api.openai.com/v1
 #   OPENAI_MODEL=gpt-4o
-# research mode additionally wants SERPER_API_KEY / JINA_API_KEY
+# For keyless Parallel search set WEB_SEARCH_PROVIDER=parallel; it returns up
+# to 10 results per query. Serper remains the default and uses SERPER_API_KEY.
+# Page fetch uses JINA_API_KEY.
 
 # Interactive TUI, Stateful ReAct, against another repository
 frontier-agent --mode react --cwd /path/to/your/repo

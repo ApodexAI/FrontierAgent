@@ -111,6 +111,22 @@ def test_search_credentials_are_checked_when_the_profile_binds_the_web_tools():
     assert with_search.ok
     assert [issue.code for issue in with_search.warnings] == ["missing_jina_api_key"]
 
+    parallel = inspect_runtime_config(
+        cfg,
+        profile=_profile(tool_names=_WEB_TOOLS),
+        environ={"WEB_SEARCH_PROVIDER": "parallel"},
+    )
+    assert parallel.ok
+    assert [issue.code for issue in parallel.warnings] == ["missing_jina_api_key"]
+
+    invalid_provider = inspect_runtime_config(
+        cfg,
+        profile=_profile(tool_names=_WEB_TOOLS),
+        environ={"WEB_SEARCH_PROVIDER": "unknown"},
+    )
+    assert not invalid_provider.ok
+    assert "invalid_web_search_provider" in {issue.code for issue in invalid_provider.errors}
+
     no_web_tools = inspect_runtime_config(
         cfg, profile=_profile(tool_names=("bash", "read_file")), environ={},
     )
