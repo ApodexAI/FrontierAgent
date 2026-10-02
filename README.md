@@ -236,11 +236,14 @@ Chinese-speaking macOS users can use the
 ## Containers and local models
 
 Pre-built `linux/amd64` and `linux/arm64` images are published to the GitHub
-Container Registry, so no local Python environment is needed:
+Container Registry, so no local Python environment is needed. That package is
+private, so `docker login ghcr.io` (with an account authorized for it) is
+required — otherwise build the checkout:
 
 ```bash
 cp .env.example .env
-docker compose run --rm agent
+docker compose -f compose.yaml -f compose.dev.yaml build
+docker compose -f compose.yaml -f compose.dev.yaml run --rm agent
 ```
 
 - [Run FrontierAgent in Docker](docs/install/docker.md) — Compose, image

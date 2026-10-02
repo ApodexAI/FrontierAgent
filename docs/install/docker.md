@@ -2,8 +2,20 @@
 
 FrontierAgent publishes pre-built `linux/amd64` and `linux/arm64` images to the
 GitHub Container Registry. Using them requires no local Python environment and
-no system dependencies beyond Docker itself. The default `compose.yaml` pulls
-that published image; it does not build the repository locally.
+no system dependencies beyond Docker itself. The default `compose.yaml` uses
+that published image.
+
+That package is **private**, so an anonymous pull fails with `unauthorized`.
+You need one of:
+
+- a GitHub account or token already authorized for the package, in which case
+  run `docker login ghcr.io` first; or
+- a local build of this checkout, which is what the commands below do and
+  needs no registry access.
+
+Because `compose.yaml` sets `pull_policy: always`, the build path keeps the
+`compose.dev.yaml` override on every command — its `pull_policy: build` keeps
+the local image in use instead of retrying the registry.
 
 This page covers the CPU agent container. For a **local NVIDIA model server**,
 the GPU belongs to a separate SGLang container or process — use
@@ -20,14 +32,27 @@ git clone https://github.com/ApodexAI/FrontierAgent.git
 cd FrontierAgent
 cp .env.example .env
 
-# Interactive CLI
+# With registry access, the published image needs no build:
 docker compose run --rm agent
+```
+
+Without it, build from this checkout and keep the override on every command:
+
+```bash
+git clone https://github.com/ApodexAI/FrontierAgent.git
+cd FrontierAgent
+cp .env.example .env
+docker compose -f compose.yaml -f compose.dev.yaml build
+
+# Interactive CLI
+docker compose -f compose.yaml -f compose.dev.yaml run --rm agent
 
 # One-shot agent command
-docker compose run --rm agent -p "explain pyproject.toml"
+docker compose -f compose.yaml -f compose.dev.yaml run --rm agent \
+  -p "explain pyproject.toml"
 
 # Default benchmark evaluation (BrowseComp, one task)
-docker compose run --rm eval
+docker compose -f compose.yaml -f compose.dev.yaml run --rm eval
 ```
 
 Compose writes session records and deliverables to `.apodex/runs/<session-id>/`.
@@ -47,6 +72,10 @@ The convenience helper wraps the same thing:
 ./docker/run.sh eval --limit 5
 ```
 
+`run.sh` uses `compose.yaml` on its own, so it needs registry access to the
+private package. Keep the `compose.dev.yaml` override instead when building
+locally.
+
 ## Pin a release or another image
 
 Set `FRONTIER_AGENT_IMAGE` before running Compose:
@@ -56,12 +85,22 @@ FRONTIER_AGENT_IMAGE=ghcr.io/apodexai/frontieragent:latest \
   docker compose run --rm agent -p "explain pyproject.toml"
 ```
 
+Any image name works here, including one you built and tagged yourself, or one
+mirrored to a registry you can reach.
+
 ## Direct `docker run`
 
 Compose is the supported path; this is the equivalent for environments that
 cannot use it. The environment variables and mounts are not optional — they are
 what tells the runtime it is inside a container and where the three sandbox
 roots live.
+
+The image reference below is the private published image, so it needs registry
+access. To run without it, build the checkout and use that tag instead:
+
+```bash
+docker build -t frontier-agent:local .
+```
 
 ```bash
 docker run --rm -it \
@@ -84,7 +123,7 @@ docker run --rm -it \
   -v frontier-agent-state:/root/.apodex \
   -v frontier-agent-config:/root/.config/apodex \
   -w /workspace \
-  ghcr.io/apodexai/frontieragent:latest \
+  frontier-agent:local \
   -p "explain main workflow"
 ```
 
@@ -94,26 +133,33 @@ For a terminal deployment accessed over SSH:
 
 1. Provision an EC2 or ECS Linux instance with Docker and the Compose plugin.
 2. Clone this repository and create `.env` from `.env.example`.
-3. Pull and launch the pre-built container:
+3. Launch the container:
 
 ```bash
 git clone https://github.com/ApodexAI/FrontierAgent.git
 cd FrontierAgent
 cp .env.example .env
-# Edit .env, then:
+# Edit .env, then — one of:
+
+# With registry access, use the published image:
+docker login ghcr.io
 docker compose pull agent
 docker compose run --rm agent
+
+# Or build this checkout on the instance, no registry access needed:
+docker compose -f compose.yaml -f compose.dev.yaml build
+docker compose -f compose.yaml -f compose.dev.yaml run --rm agent
 ```
 
 The container itself is disposable; Compose persists sessions, configuration,
-attachments, and deliverables in volumes or the checked-out workspace. Pull the
-image again to upgrade. This is an interactive SSH/TUI deployment, not a
-long-running HTTP service.
+attachments, and deliverables in volumes or the checked-out workspace. Rebuild
+(or `docker compose pull agent`) to upgrade. This is an interactive SSH/TUI
+deployment, not a long-running HTTP service.
 
 ## Build from the current checkout
 
-To run your own changes instead of the published image, add the development
-override:
+The development override builds this checkout instead of using the published
+image, which is the only path that needs no registry access:
 
 ```bash
 cp .env.example .env
@@ -122,6 +168,11 @@ docker compose -f compose.yaml -f compose.dev.yaml run --rm agent --version
 docker compose -f compose.yaml -f compose.dev.yaml run --rm eval \
   --benchmark browsecomp --limit 1 --out /app/results/smoke
 ```
+
+Once the image is built, keep the `compose.dev.yaml` override on the run
+command too. `compose.yaml` sets `pull_policy: always`, so it reaches for the
+private registry on every start and fails for anyone without access — the
+override's `pull_policy: build` keeps the local image in use.
 
 `docker build -t apodex:local .` builds the same image under the name that the
 macOS `--docker` path expects. See [Contributing](../../CONTRIBUTING.md) for the
