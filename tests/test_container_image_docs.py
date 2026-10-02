@@ -101,6 +101,34 @@ def test_docker_quickstart_offers_a_path_that_needs_no_registry() -> None:
     )
 
 
+def test_documented_local_tag_opts_out_of_the_registry() -> None:
+    """A locally built tag has to say `--pull never` to be usable.
+
+    `compose.yaml` sets `pull_policy: always`, so `FRONTIER_AGENT_IMAGE` pointed at a
+    tag that exists only on this machine still makes Compose resolve it against a
+    registry and fail.
+    """
+    text = (_REPO_ROOT / "docs/install/docker.md").read_text(encoding="utf-8")
+    # The local-tag example is prefixed with FRONTIER_AGENT_IMAGE=..., which `_run_commands`
+    # only matches when `docker compose` starts the line.
+    joined = text.replace("\\\n", " ")
+    local_runs = [
+        line.strip()
+        for line in joined.splitlines()
+        if re.match(r"\s*(?:[A-Z_][A-Z0-9_]*=\S+\s+)?docker compose\b.*\brun\b", line)
+        and "frontier-agent:local" in line
+    ]
+    assert local_runs, (
+        "docs/install/docker.md documents a locally built tag but never runs it "
+        "through Compose, so there is no local-only example to check"
+    )
+    offenders = [command for command in local_runs if "--pull never" not in command]
+    assert not offenders, (
+        "a locally built tag without --pull never is re-fetched from the registry "
+        "by compose.yaml's pull_policy: always: " + "; ".join(offenders)
+    )
+
+
 def test_readme_quickstart_offers_a_path_that_needs_no_registry() -> None:
     """The README snippet is the most-read entry point for the container path."""
     text = (_REPO_ROOT / "README.md").read_text(encoding="utf-8")

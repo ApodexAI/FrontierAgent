@@ -88,6 +88,15 @@ FRONTIER_AGENT_IMAGE=ghcr.io/apodexai/frontieragent:latest \
 Any image name works here, including one you built and tagged yourself, or one
 mirrored to a registry you can reach.
 
+A tag that exists only on this machine is the exception. `compose.yaml` sets
+`pull_policy: always`, so Compose would still try to resolve it from a registry.
+Pass `--pull never` so it uses the local image:
+
+```bash
+FRONTIER_AGENT_IMAGE=frontier-agent:local \
+  docker compose run --pull never --rm agent
+```
+
 ## Direct `docker run`
 
 Compose is the supported path; this is the equivalent for environments that
@@ -95,12 +104,15 @@ cannot use it. The environment variables and mounts are not optional — they ar
 what tells the runtime it is inside a container and where the three sandbox
 roots live.
 
-The image reference below is the private published image, so it needs registry
-access. To run without it, build the checkout and use that tag instead:
+The command below runs `frontier-agent:local`, which you build from this
+checkout first, so it needs no registry access:
 
 ```bash
 docker build -t frontier-agent:local .
 ```
+
+To use the private published image instead, replace that tag with
+`ghcr.io/apodexai/frontieragent:latest` and `docker login ghcr.io` first.
 
 ```bash
 docker run --rm -it \
