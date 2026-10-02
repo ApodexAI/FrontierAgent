@@ -798,6 +798,29 @@ def _split_top_level(command: str) -> list[str]:
     return [s.strip() for s in segs if s.strip()]
 
 
+def _backtick_body(command: str, i: int) -> tuple[str, int]:
+    """Read a backtick body and apply bash's first-pass escape removal.
+
+    Inside backticks, backslashes before $, `, a backslash or a newline are removed
+    before the body is parsed as shell code. Other backslashes are retained.
+    Return the decoded body and the closing backtick's index (len if absent).
+    """
+    body: list[str] = []
+    n = len(command)
+    while i < n:
+        c = command[i]
+        if c == "`":
+            break
+        if c == "\\" and i + 1 < n and command[i + 1] in "$`\\\n":
+            i += 1
+            if command[i] != "\n":
+                body.append(command[i])
+        else:
+            body.append(c)
+        i += 1
+    return "".join(body), i
+
+
 def _substitution_end(command: str, i: int) -> int:
     """Index of the ``)`` closing a ``$(`` whose body starts at ``i``, or
     ``len(command)`` when unterminated. Quoted or escaped parens don't count,
@@ -920,10 +943,8 @@ def _extract_nested_shell(command: str) -> list[str]:
             i = end + 1
             continue
         elif c == "`":
-            j = i + 1
-            while j < n and command[j] != "`":
-                j += 2 if command[j] == "\\" else 1
-            out.append(command[i + 1:j])
+            body, j = _backtick_body(command, i + 1)
+            out.append(body)
             i = j + 1
             continue
         elif c == ">" and quote is None and command.startswith("&", i + 1):

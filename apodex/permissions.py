@@ -72,6 +72,29 @@ def _nested_shell_snippets(cmd: str) -> list[str]:
         return _fallback_nested_shell(cmd or "")
 
 
+def _fallback_backtick_body(command: str, i: int) -> tuple[str, int]:
+    """Read a backtick body and apply bash's first-pass escape removal.
+
+    Inside backticks, backslashes before $, `, a backslash or a newline are removed
+    before the body is parsed as shell code. Other backslashes are retained.
+    Return the decoded body and the closing backtick's index (len if absent).
+    """
+    body: list[str] = []
+    n = len(command)
+    while i < n:
+        c = command[i]
+        if c == "`":
+            break
+        if c == "\\" and i + 1 < n and command[i + 1] in "$`\\\n":
+            i += 1
+            if command[i] != "\n":
+                body.append(command[i])
+        else:
+            body.append(c)
+        i += 1
+    return "".join(body), i
+
+
 def _fallback_substitution_end(s: str, i: int) -> int:
     """Index of the ``)`` closing a ``$(`` whose body starts at ``i`` (``len``
     when unterminated). Quoted or escaped parens don't count, and every nested
@@ -176,10 +199,8 @@ def _fallback_nested_shell(s: str) -> list[str]:
             i = end + 1
             continue
         elif c == "`":
-            j = i + 1
-            while j < n and s[j] != "`":
-                j += 2 if s[j] == "\\" else 1
-            out.append(s[i + 1 : j])
+            body, j = _fallback_backtick_body(s, i + 1)
+            out.append(body)
             i = j + 1
             continue
         elif c == ">" and quote is None and s.startswith("&", i + 1):
