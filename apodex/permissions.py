@@ -7,14 +7,15 @@ gate stays livable without being all-or-nothing.
 
 Rules are strings: ``Bash(npm test)`` / ``Bash(git push)`` for shell, or a bare
 tool name (``write_file``) for everything else. Shell rules match by prefix per
-``&&``/``|``/``;`` segment. An allow must cover every segment and a deny fires
-on any one segment, so both fail safe.
+segment, where segments are split on ``&&``, ``||``, ``|``, ``;``, ``&`` and
+newlines. An allow must cover every segment and a deny fires on any one
+segment, so both fail safe.
 
 Safety contract: this store only ever *downgrades a plain confirm to safe*, or
 *forces a deny*. It is consulted in :func:`agent_tools.assess_tool_risk` AFTER
 danger detection and the hard denylist — so a saved ``Bash(git)`` allow can
-never green-light a dangerous ``git push --force``. Every ``$(...)`` or
-backtick substitution the shell would run, unquoted or inside double quotes,
+never green-light a dangerous ``git push --force``. Every command the shell
+would run from a ``$(...)``, backtick or ``<(...)``/``>(...)`` substitution
 needs its own match against the saved allow prefixes. A deny prefix also fires
 on a command nested inside one. A command carrying a ``danger`` label never
 downgrades, so the typed-confirmation gate still fires.
@@ -35,14 +36,22 @@ _MULTI_VERB = frozenset({
     "git", "npm", "pnpm", "yarn", "uv", "pip", "pip3", "cargo", "go", "docker",
     "poetry", "conda", "make", "apt", "apt-get", "brew", "kubectl", "gh",
 })
-_SEGMENT_SPLIT = re.compile(r"&&|\|\||\||;")
+# Command separators: ``&&`` ``||`` ``|`` ``;``, a newline, and a single ``&``
+# (background). The ``&`` inside a redirection (``2>&1``, ``>&2``, ``&>log``)
+# is not a separator, and the lookarounds skip it.
+_SEGMENT_SPLIT = re.compile(r"&&|\|\||\||;|\n|(?<![<>])&(?![>&])")
+# How many levels of nested ``$(...)`` the matcher follows. Real commands use
+# one or two. Past this, allow fails closed and deny fires, instead of
+# recursing until Python raises RecursionError.
+_MAX_NEST_DEPTH = 16
 _HELPER_CMDS = frozenset({
     "cd", "pwd", "export", "set", "env", "echo", "mkdir", "clear", "true", "source", ".",
 })
 
 
 def _nested_shell_snippets(cmd: str) -> list[str]:
-    """Shell-code strings nested in ``$(...)``/backticks the shell would run.
+    """Shell-code strings nested in ``$(...)``, backticks, ``<(...)`` and
+    ``>(...)``, which the shell runs as separate commands.
 
     Reuses :func:`plugins.tools._bash_policy._extract_nested_shell` (stdlib-only,
     no import cycle). It reads quotes the way bash does. A single-quoted span is
@@ -65,8 +74,52 @@ def _nested_shell_snippets(cmd: str) -> list[str]:
 
 def _fallback_substitution_end(s: str, i: int) -> int:
     """Index of the ``)`` closing a ``$(`` whose body starts at ``i`` (``len``
-    when unterminated); quoted or escaped parens don't count."""
-    depth, n = 1, len(s)
+    when unterminated). Quoted or escaped parens don't count, and every nested
+    ``$(`` starts with its own quote state, as in bash."""
+    n = len(s)
+    quotes: list[str | None] = [None]  # quote state of each open $( level
+    depths = [1]  # unquoted "(" nesting inside each open $( level
+    while i < n:
+        c = s[i]
+        quote = quotes[-1]
+        if quote == "'":
+            if c == "'":
+                quotes[-1] = None
+        elif c == "\\":
+            i += 1
+        elif s.startswith("(", i + 1) and (c == "$" or (c in "<>" and quote is None)):
+            quotes.append(None)
+            depths.append(1)
+            i += 1
+        elif c == "`":
+            i += 1
+            while i < n and s[i] != "`":
+                i += 2 if s[i] == "\\" else 1
+        elif c == '"':
+            quotes[-1] = None if quote else '"'
+        elif quote is None:
+            if c == "'":
+                quotes[-1] = "'"
+            elif c == "(":
+                depths[-1] += 1
+            elif c == ")":
+                depths[-1] -= 1
+                if depths[-1] == 0:
+                    if len(depths) == 1:
+                        return i
+                    depths.pop()
+                    quotes.pop()
+        i += 1
+    return n
+
+
+def _fallback_dup_redirect_word(s: str, i: int) -> str:
+    """Target word of a ``>&`` redirect starting at ``i``, quotes and
+    backslashes removed. bash expands it a second time after quote removal."""
+    n = len(s)
+    while i < n and s[i] in " \t":
+        i += 1
+    start = i
     quote: str | None = None
     while i < n:
         c = s[i]
@@ -75,19 +128,21 @@ def _fallback_substitution_end(s: str, i: int) -> int:
                 quote = None
         elif c == "\\":
             i += 1
+        elif s.startswith("$(", i):
+            i = _fallback_substitution_end(s, i + 2)
+        elif c == "`":
+            i += 1
+            while i < n and s[i] != "`":
+                i += 2 if s[i] == "\\" else 1
         elif c == '"':
             quote = None if quote else '"'
         elif quote is None:
             if c == "'":
                 quote = "'"
-            elif c == "(":
-                depth += 1
-            elif c == ")":
-                depth -= 1
-                if depth == 0:
-                    return i
+            elif c.isspace() or c in ";&|<>()":
+                break
         i += 1
-    return n
+    return re.sub(r"[\\'\"]", "", s[start:i])
 
 
 def _fallback_nested_shell(s: str) -> list[str]:
@@ -95,6 +150,8 @@ def _fallback_nested_shell(s: str) -> list[str]:
 
     It tracks single quotes, double quotes and backslash escapes. An
     unterminated substitution yields the rest of the string, which fails closed.
+    The target of ``>&`` is read with its quotes removed, because bash expands
+    it twice.
     """
     out: list[str] = []
     i, n = 0, len(s)
@@ -113,7 +170,7 @@ def _fallback_nested_shell(s: str) -> list[str]:
             quote = "'"
         elif c == '"':
             quote = None if quote else '"'
-        elif c == "$" and s.startswith("(", i + 1):
+        elif s.startswith("(", i + 1) and (c == "$" or (c in "<>" and quote is None)):
             end = _fallback_substitution_end(s, i + 2)
             out.append(s[i + 2 : end])
             i = end + 1
@@ -125,29 +182,34 @@ def _fallback_nested_shell(s: str) -> list[str]:
             out.append(s[i + 1 : j])
             i = j + 1
             continue
+        elif c == ">" and quote is None and s.startswith("&", i + 1):
+            out.extend(_fallback_nested_shell(_fallback_dup_redirect_word(s, i + 2)))
         i += 1
     return out
 
 
-def _nested_segments_authorized(nested: str, prefixes: set[str]) -> bool:
-    """True when every ``&&``/``|``/``;`` piece of a nested snippet matches.
+def _nested_segments_authorized(nested: str, prefixes: set[str], depth: int = 0) -> bool:
+    """True when every segment of a nested snippet matches.
 
     Each piece must itself satisfy the same ``seg == p or seg.startswith(p)``
     prefix rule, transitively (a nested snippet containing further substitution
     must have that inner payload authorized too). Fail-closed: empty or
-    unmatched pieces return False.
+    unmatched pieces return False, and so does nesting deeper than
+    ``_MAX_NEST_DEPTH``.
     """
-    segs = _segments(nested)
-    if not segs:
+    if depth >= _MAX_NEST_DEPTH:
         return False
-    for seg in segs:
-        if not _seg_matches(seg, prefixes):
-            return False
-        # Transitive: ``echo $(foo $(bar))`` needs ``bar`` authorized as well.
-        for inner in _nested_shell_snippets(seg):
-            if not _nested_segments_authorized(inner, prefixes):
-                return False
-    return True
+    segs = _segments(nested)
+    if not segs or not all(_seg_matches(seg, prefixes) for seg in segs):
+        return False
+    # Transitive: ``echo $(foo $(bar))`` needs ``bar`` authorized as well. The
+    # inner payloads come from the whole snippet, not from each piece. The
+    # split ignores quotes, so a quoted ``;`` would cut a string in half and
+    # could hide ``$(...)`` inside what then looks like a single-quoted span.
+    return all(
+        _nested_segments_authorized(inner, prefixes, depth + 1)
+        for inner in _nested_shell_snippets(nested)
+    )
 
 
 def _segments(cmd: str) -> list[str]:
@@ -158,17 +220,23 @@ def _seg_matches(seg: str, prefixes: set[str]) -> bool:
     return any(seg == p or seg.startswith(p + " ") for p in prefixes)
 
 
-def _denied_anywhere(cmd: str, prefixes: set[str]) -> bool:
+def _denied_anywhere(cmd: str, prefixes: set[str], depth: int = 0) -> bool:
     """True when any segment matches a deny prefix, at the top level or nested
     in a substitution at any depth.
 
     This is the opposite of the allow check, which needs every segment to
     match. A nested command that matches no rule never cancels a deny on its
-    parent, so ``Bash(echo)`` still denies ``echo $(touch x)``.
+    parent, so ``Bash(echo)`` still denies ``echo $(touch x)``. Nesting deeper
+    than ``_MAX_NEST_DEPTH`` counts as denied, because the rest can't be checked.
     """
+    if depth >= _MAX_NEST_DEPTH:
+        return True
     if any(_seg_matches(seg, prefixes) for seg in _segments(cmd)):
         return True
-    return any(_denied_anywhere(inner, prefixes) for inner in _nested_shell_snippets(cmd))
+    return any(
+        _denied_anywhere(inner, prefixes, depth + 1)
+        for inner in _nested_shell_snippets(cmd)
+    )
 
 
 def _extract_prefix_from_segment(seg: str) -> str:

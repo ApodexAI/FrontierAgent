@@ -1397,10 +1397,72 @@ def test_nested_shell_extractors_agree():
         "echo $(i $(j))": ["i $(j)"],
         "echo $(unterminated": ["unterminated"],
         r"echo \`k\`": [],
+        """echo $(echo "$(echo ")'")" $(l))""": ["""echo "$(echo ")'")" $(l)"""],
+        "cat <(m) >(n)": ["m", "n"],
+        'echo "<(o)"': [],
+        "echo x >&'$(p)'": ["p"],
+        "echo x > '$(q)'": [],
+        "python x.py 2>&1": [],
     }
     for cmd, want in corpus.items():
         assert _extract_nested_shell(cmd) == want, cmd
         assert _fallback_nested_shell(cmd) == want, cmd
+
+
+def test_nested_quotes_do_not_end_the_outer_substitution(tmp_path):
+    """Each nested ``$(`` has its own quote state (PR #42 second review)."""
+    from apodex.agent_tools import RISK_CONFIRM, assess_with_rules
+    from apodex.permissions import PermissionStore
+
+    rules = PermissionStore(allow={"Bash(echo)"})
+    for cmd in (
+        """echo $(echo "$(echo ")'")" $(touch /tmp/marker))""",
+        # A quoted ";" must not split the snippet before its payloads are read.
+        """echo $(echo "a;echo '" $(touch /tmp/marker) "'")""",
+    ):
+        assert not rules.allows("bash", {"command": cmd}), cmd
+        assert assess_with_rules("bash", {"command": cmd}, str(tmp_path), rules).level == RISK_CONFIRM
+    assert rules.allows("bash", {"command": """echo $(echo "$(echo ")'")")"""})
+
+
+def test_separators_and_process_substitution_need_authorization():
+    """``&``, newlines and ``<(...)``/``>(...)`` all run another command."""
+    from apodex.permissions import PermissionStore
+
+    rules = PermissionStore(allow={"Bash(echo)", "Bash(python)", "Bash(cat)"})
+    for cmd in ("echo hi & touch /tmp/marker", "echo hi\ntouch /tmp/marker",
+                "cat <(touch /tmp/marker)", "echo >(touch /tmp/marker)"):
+        assert not rules.allows("bash", {"command": cmd}), cmd
+    # The "&" in a redirection is not a separator.
+    for cmd in ("python x.py 2>&1", "python x.py >&2", "python x.py &> out.log",
+                "python x.py &", "cat <(echo a)", 'echo "<(touch /tmp/marker)"'):
+        assert rules.allows("bash", {"command": cmd}), cmd
+    assert PermissionStore(deny={"Bash(touch)"}).denies(
+        "bash", {"command": "echo hi & touch /tmp/marker"}
+    )
+
+
+def test_dup_redirect_target_is_expanded_twice(tmp_path):
+    """bash expands a ``>&word`` target again after quote removal, so
+    ``echo x >&'$(touch m)'`` runs ``touch`` despite the single quotes."""
+    from apodex.agent_tools import RISK_CONFIRM, assess_with_rules
+    from apodex.permissions import PermissionStore
+    from plugins.tools._bash_policy import assess_bash_command
+
+    rules = PermissionStore(allow={"Bash(echo)"})
+    cmd = {"command": "echo x >&'$(touch /tmp/marker)'"}
+    assert not rules.allows("bash", cmd)
+    assert assess_with_rules("bash", cmd, str(tmp_path), rules).level == RISK_CONFIRM
+    assert rules.allows("bash", {"command": "echo x > '$(touch /tmp/marker)'"})  # plain > is literal
+    assert assess_bash_command("echo x >&'$(foobarcmd)'", mode="enforce").level == "deny"
+
+
+def test_deep_nesting_fails_closed_without_recursion_error():
+    from apodex.permissions import PermissionStore
+
+    cmd = {"command": "echo " + "$(echo " * 2000 + "x" + ")" * 2000}
+    assert not PermissionStore(allow={"Bash(echo)"}).allows("bash", cmd)
+    assert PermissionStore(allow={"Bash(*)"}, deny={"Bash(rm)"}).denies("bash", cmd)
 
 
 def test_user_settings_save_and_load(tmp_path):
