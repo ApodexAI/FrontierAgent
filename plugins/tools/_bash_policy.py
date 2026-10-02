@@ -798,41 +798,71 @@ def _split_top_level(command: str) -> list[str]:
     return [s.strip() for s in segs if s.strip()]
 
 
-def _extract_nested_shell(command: str) -> list[str]:
-    """Return shell-code strings nested in ``$(...)`` and backticks (which the
-    shell expands+executes). Single-quoted spans are skipped — the shell does
-    not expand them, so ``echo '$(rm -rf /)'`` is a harmless literal."""
-    out: list[str] = []
-    i, n = 0, len(command)
-    sq = False
+def _substitution_end(command: str, i: int) -> int:
+    """Index of the ``)`` closing a ``$(`` whose body starts at ``i``, or
+    ``len(command)`` when unterminated. Quoted or escaped parens don't count,
+    so ``$(echo ")"; rm x)`` closes at the last ``)``, not inside the quotes."""
+    depth, n = 1, len(command)
+    quote: str | None = None
     while i < n:
         c = command[i]
-        if sq:
+        if quote == "'":
             if c == "'":
-                sq = False
+                quote = None
+        elif c == "\\":
+            i += 1
+        elif c == '"':
+            quote = None if quote else '"'
+        elif quote is None:
+            if c == "'":
+                quote = "'"
+            elif c == "(":
+                depth += 1
+            elif c == ")":
+                depth -= 1
+                if depth == 0:
+                    return i
+        i += 1
+    return n
+
+
+def _extract_nested_shell(command: str) -> list[str]:
+    """Return shell-code strings nested in ``$(...)`` and backticks (which the
+    shell expands+executes).
+
+    It reads quotes the way bash does. A single-quoted span is skipped, so
+    ``echo '$(rm -rf /)'`` is a harmless literal. Inside double quotes a ``'``
+    is an ordinary character and substitution still runs, so
+    ``echo "'$(rm -rf /)'"`` yields ``rm -rf /``. A backslash outside single
+    quotes escapes the next character (``\\$(...)``, ``\\'``, ``\\"``). An
+    unterminated substitution yields the rest of the string, which fails closed.
+    """
+    out: list[str] = []
+    i, n = 0, len(command)
+    quote: str | None = None
+    while i < n:
+        c = command[i]
+        if quote == "'":
+            if c == "'":
+                quote = None
             i += 1
             continue
-        if c == "'":
-            sq = True
-            i += 1
+        if c == "\\":
+            i += 2
             continue
-        if c == "$" and i + 1 < n and command[i + 1] == "(":
-            depth, j = 1, i + 2
-            start = j
-            while j < n and depth:
-                if command[j] == "(":
-                    depth += 1
-                elif command[j] == ")":
-                    depth -= 1
-                j += 1
-            if depth == 0:
-                out.append(command[start:j - 1])
-            i = j
+        if c == "'" and quote is None:
+            quote = "'"
+        elif c == '"':
+            quote = None if quote else '"'
+        elif c == "$" and command.startswith("(", i + 1):
+            end = _substitution_end(command, i + 2)
+            out.append(command[i + 2:end])
+            i = end + 1
             continue
-        if c == "`":
+        elif c == "`":
             j = i + 1
             while j < n and command[j] != "`":
-                j += 1
+                j += 2 if command[j] == "\\" else 1
             out.append(command[i + 1:j])
             i = j + 1
             continue

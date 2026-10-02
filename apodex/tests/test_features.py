@@ -1326,6 +1326,81 @@ def test_single_quoted_substitution_is_literal(tmp_path):
 
     rules = PermissionStore(allow={"Bash(echo)"})
     assert rules.allows("bash", {"command": "echo '$(pip install x)'"})
+    assert rules.allows("bash", {"command": r"echo \$(pip install x)"})  # escaped, so literal
+
+
+def test_deny_rule_still_matches_parent_of_substitution(tmp_path):
+    """A nested command that matches no rule must not cancel a deny (PR #42 review)."""
+    from apodex.agent_tools import RISK_DENY, assess_with_rules
+    from apodex.permissions import PermissionStore
+
+    cwd = str(tmp_path)
+    rules = PermissionStore(allow={"Bash(*)"}, deny={"Bash(echo)"})
+    cmd = {"command": "echo $(touch /tmp/marker)"}
+    assert rules.denies("bash", cmd)
+    assert assess_with_rules("bash", cmd, cwd, rules).level == RISK_DENY
+    # A deny prefix also fires on a command nested inside a substitution.
+    nested = PermissionStore(allow={"Bash(*)"}, deny={"Bash(touch)"})
+    assert assess_with_rules("bash", cmd, cwd, nested).level == RISK_DENY
+    # It also fires on any one top-level segment, not only when all of them match.
+    assert PermissionStore(deny={"Bash(git push)"}).denies(
+        "bash", {"command": "git status && git push origin main"}
+    )
+
+
+def test_helper_segment_substitution_needs_authorization(tmp_path):
+    """The helper filter must not hide a payload inside an echo segment (PR #42 review)."""
+    from apodex.agent_tools import RISK_CONFIRM, assess_with_rules
+    from apodex.permissions import PermissionStore
+
+    rules = PermissionStore(allow={"Bash(python)"})
+    cmd = {"command": "echo $(touch /tmp/marker) && python -V"}
+    assert not rules.allows("bash", cmd)
+    assert assess_with_rules("bash", cmd, str(tmp_path), rules).level == RISK_CONFIRM
+    assert rules.allows("bash", {"command": "echo hi && python -V"})  # a plain helper is still skipped
+    assert not rules.allows("bash", {"command": '"" && python -V'})  # empty word returns False, no IndexError
+
+
+def test_double_quoted_substitution_is_not_literal(tmp_path):
+    """A ``'`` inside ``"..."`` is an ordinary character, so ``$(...)`` still runs (PR #42 review)."""
+    from apodex.agent_tools import RISK_CONFIRM, assess_with_rules
+    from apodex.permissions import PermissionStore
+    from plugins.tools._bash_policy import assess_bash_command
+
+    rules = PermissionStore(allow={"Bash(echo)"})
+    for cmd in (
+        "echo \"'$(touch /tmp/marker)'\"",
+        r"echo \' $(touch /tmp/marker) \'",  # an escaped ' does not start a quoted span
+        r'''echo "a\"'$(touch /tmp/marker)'"''',  # an escaped " does not end the string
+        'echo $(echo ")"; touch /tmp/marker)',  # a quoted ")" does not end the substitution
+    ):
+        assert not rules.allows("bash", {"command": cmd}), cmd
+        assert assess_with_rules("bash", {"command": cmd}, str(tmp_path), rules).level == RISK_CONFIRM
+    # The sandbox bash policy uses the same extractor.
+    assert assess_bash_command("echo \"'$(foobarcmd)'\"", mode="enforce").level == "deny"
+
+
+def test_nested_shell_extractors_agree():
+    """The fallback scanner in permissions.py must match the shared extractor."""
+    from apodex.permissions import _fallback_nested_shell
+    from plugins.tools._bash_policy import _extract_nested_shell
+
+    corpus = {
+        "echo $(a)": ["a"],
+        "echo `b`": ["b"],
+        "echo '$(c)'": [],
+        "echo \"'$(d)'\"": ["d"],
+        r"echo \$(e)": [],
+        r"echo \' $(f) \'": ["f"],
+        r'''echo "a\"'$(g)'"''': ["g"],
+        'echo $(echo ")"; h)': ['echo ")"; h'],
+        "echo $(i $(j))": ["i $(j)"],
+        "echo $(unterminated": ["unterminated"],
+        r"echo \`k\`": [],
+    }
+    for cmd, want in corpus.items():
+        assert _extract_nested_shell(cmd) == want, cmd
+        assert _fallback_nested_shell(cmd) == want, cmd
 
 
 def test_user_settings_save_and_load(tmp_path):
