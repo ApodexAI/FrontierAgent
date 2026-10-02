@@ -798,44 +798,157 @@ def _split_top_level(command: str) -> list[str]:
     return [s.strip() for s in segs if s.strip()]
 
 
-def _extract_nested_shell(command: str) -> list[str]:
-    """Return shell-code strings nested in ``$(...)`` and backticks (which the
-    shell expands+executes). Single-quoted spans are skipped — the shell does
-    not expand them, so ``echo '$(rm -rf /)'`` is a harmless literal."""
-    out: list[str] = []
-    i, n = 0, len(command)
-    sq = False
+def _backtick_body(command: str, i: int) -> tuple[str, int]:
+    """Read a backtick body and apply bash's first-pass escape removal.
+
+    Inside backticks, backslashes before $, `, a backslash or a newline are removed
+    before the body is parsed as shell code. Other backslashes are retained.
+    Return the decoded body and the closing backtick's index (len if absent).
+    """
+    body: list[str] = []
+    n = len(command)
     while i < n:
         c = command[i]
-        if sq:
-            if c == "'":
-                sq = False
-            i += 1
-            continue
-        if c == "'":
-            sq = True
-            i += 1
-            continue
-        if c == "$" and i + 1 < n and command[i + 1] == "(":
-            depth, j = 1, i + 2
-            start = j
-            while j < n and depth:
-                if command[j] == "(":
-                    depth += 1
-                elif command[j] == ")":
-                    depth -= 1
-                j += 1
-            if depth == 0:
-                out.append(command[start:j - 1])
-            i = j
-            continue
         if c == "`":
-            j = i + 1
-            while j < n and command[j] != "`":
-                j += 1
-            out.append(command[i + 1:j])
+            break
+        if c == "\\" and i + 1 < n and command[i + 1] in "$`\\\n":
+            i += 1
+            if command[i] != "\n":
+                body.append(command[i])
+        else:
+            body.append(c)
+        i += 1
+    return "".join(body), i
+
+
+def _substitution_end(command: str, i: int) -> int:
+    """Index of the ``)`` closing a ``$(`` whose body starts at ``i``, or
+    ``len(command)`` when unterminated. Quoted or escaped parens don't count,
+    so ``$(echo ")"; rm x)`` closes at the last ``)``, not inside the quotes.
+
+    Like bash, every nested ``$(`` starts with its own quote state, so the
+    quotes in ``$(echo "$(echo ")'")" $(rm x))`` pair up inside the inner
+    substitution and the scan still reaches ``rm x``. The scan keeps the levels
+    on a list instead of the call stack, so deep nesting can't hit the
+    recursion limit. It skips a backtick span whole.
+    """
+    n = len(command)
+    quotes: list[str | None] = [None]  # quote state of each open $( level
+    depths = [1]  # unquoted "(" nesting inside each open $( level
+    while i < n:
+        c = command[i]
+        quote = quotes[-1]
+        if quote == "'":
+            if c == "'":
+                quotes[-1] = None
+        elif c == "\\":
+            i += 1
+        elif command.startswith("(", i + 1) and (c == "$" or (c in "<>" and quote is None)):
+            quotes.append(None)
+            depths.append(1)
+            i += 1
+        elif c == "`":
+            i += 1
+            while i < n and command[i] != "`":
+                i += 2 if command[i] == "\\" else 1
+        elif c == '"':
+            quotes[-1] = None if quote else '"'
+        elif quote is None:
+            if c == "'":
+                quotes[-1] = "'"
+            elif c == "(":
+                depths[-1] += 1
+            elif c == ")":
+                depths[-1] -= 1
+                if depths[-1] == 0:
+                    if len(depths) == 1:
+                        return i
+                    depths.pop()
+                    quotes.pop()
+        i += 1
+    return n
+
+
+def _dup_redirect_word(command: str, i: int) -> str:
+    """The target word of a ``>&`` redirect that starts at ``i``, with its
+    quotes and backslashes removed.
+
+    bash expands that word a second time after quote removal, so
+    ``echo x >&'$(id)'`` runs ``id``. The stripped text is roughly what the
+    second pass sees. Dropping every backslash can only expose more ``$(``,
+    never hide one.
+    """
+    n = len(command)
+    while i < n and command[i] in " \t":
+        i += 1
+    start = i
+    quote: str | None = None
+    while i < n:
+        c = command[i]
+        if quote == "'":
+            if c == "'":
+                quote = None
+        elif c == "\\":
+            i += 1
+        elif command.startswith("$(", i):
+            i = _substitution_end(command, i + 2)
+        elif c == "`":
+            i += 1
+            while i < n and command[i] != "`":
+                i += 2 if command[i] == "\\" else 1
+        elif c == '"':
+            quote = None if quote else '"'
+        elif quote is None:
+            if c == "'":
+                quote = "'"
+            elif c.isspace() or c in ";&|<>()":
+                break
+        i += 1
+    return re.sub(r"[\\'\"]", "", command[start:i])
+
+
+def _extract_nested_shell(command: str) -> list[str]:
+    """Return shell-code strings nested in ``$(...)``, backticks and unquoted
+    process substitution ``<(...)``/``>(...)`` (which the shell executes).
+
+    It reads quotes the way bash does. A single-quoted span is skipped, so
+    ``echo '$(rm -rf /)'`` is a harmless literal. Inside double quotes a ``'``
+    is an ordinary character and substitution still runs, so
+    ``echo "'$(rm -rf /)'"`` yields ``rm -rf /``. A backslash outside single
+    quotes escapes the next character (``\\$(...)``, ``\\'``, ``\\"``). An
+    unterminated substitution yields the rest of the string, which fails closed.
+    The one exception to quoting is the target of ``>&``, which bash expands
+    twice (see :func:`_dup_redirect_word`).
+    """
+    out: list[str] = []
+    i, n = 0, len(command)
+    quote: str | None = None
+    while i < n:
+        c = command[i]
+        if quote == "'":
+            if c == "'":
+                quote = None
+            i += 1
+            continue
+        if c == "\\":
+            i += 2
+            continue
+        if c == "'" and quote is None:
+            quote = "'"
+        elif c == '"':
+            quote = None if quote else '"'
+        elif command.startswith("(", i + 1) and (c == "$" or (c in "<>" and quote is None)):
+            end = _substitution_end(command, i + 2)
+            out.append(command[i + 2:end])
+            i = end + 1
+            continue
+        elif c == "`":
+            body, j = _backtick_body(command, i + 1)
+            out.append(body)
             i = j + 1
             continue
+        elif c == ">" and quote is None and command.startswith("&", i + 1):
+            out.extend(_extract_nested_shell(_dup_redirect_word(command, i + 2)))
         i += 1
     return out
 
