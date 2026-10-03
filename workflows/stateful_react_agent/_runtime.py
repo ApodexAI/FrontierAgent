@@ -116,7 +116,7 @@ def render_system_prompt_notes(
 # mid-token. Without the rescue that fragment IS the answer — which is how a run
 # whose visible output was "The shell ate my `" scored zero.
 _GRACEFUL_FINAL_STOP_REASONS = frozenset({
-    "max_turns", "context_limit_reached", "response_truncated",
+    "max_turns", "context_limit_reached", "response_truncated", "no_tool",
 })
 
 # Abnormal / infra terminations: the LLM endpoint exhausted retries
