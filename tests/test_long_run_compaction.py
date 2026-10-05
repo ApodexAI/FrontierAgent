@@ -784,18 +784,17 @@ def test_a_spilled_body_is_readable_but_not_writable_by_the_file_tools(
     from plugins.tools._path_auth import _is_path_allowed
 
     monkeypatch.setenv("APODEX_SPILL_DIR", str(tmp_path / "store"))
+    from plugins.tools._sandbox import resolve_runtime_path
+
     token = set_current_execution_scope(ExecutionScope(task_id="t", metadata={}))
     try:
         visible = _overflow.spill_compacted_body("bash", "body " * 400)
+        assert visible
+        physical = resolve_runtime_path(visible)
+        readable, _ = _is_path_allowed(physical)
+        writable, reason = _is_path_allowed(physical, write_access=True)
     finally:
         reset_current_execution_scope(token)
-    assert visible
-
-    from plugins.tools._sandbox import resolve_runtime_path
-
-    physical = resolve_runtime_path(visible)
-    readable, _ = _is_path_allowed(physical)
-    writable, reason = _is_path_allowed(physical, write_access=True)
 
     assert readable, "recovery cannot work if the store is unreadable"
     assert not writable, reason

@@ -4,66 +4,121 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
-import json
 import logging
 import os
-import time
-import uuid
+import threading
+from collections import OrderedDict
+from collections.abc import Callable
 from pathlib import Path
+
+from agent_core.runtime.spill import SpillStore, scope_component
 
 from plugins.tools.meta import get_tool_meta
 
 logger = logging.getLogger(__name__)
 
-# The store's physical root comes from ``_sandbox.spill_root()``; see there for
-# why it lives outside every root the agent can write. What is left here is the
-# per-conversation partitioning under it.
-_RUN_SUBDIR = "spill"
+# Persistence is AgentCore's ``SpillStore`` — one implementation, one registry
+# of created stores — so nothing here writes, reads or deletes spill files by
+# hand any more. What stays product-side is the policy around it:
+#
+#   * the scope KEY (:func:`current_store_scope`), which is the one identity the
+#     store directory, the bwrap mount (``spill_bind_args``) and read
+#     authorization (``_path_auth``) all derive from;
+#   * the VISIBLE root (:func:`_visible_root`), i.e. whether the backend that
+#     actually runs model commands can name the store at all;
+#   * preview shaping and the footer, through AgentCore's ``budgeted_preview``.
 _SPILL_SEPARATOR = "\n---\n\n"
-# Backends whose commands always run on this process's own filesystem, so the
-# physical path IS the path a model command can name. Container mode normally
-# does too, but may opt into an inner bwrap jail; that case is resolved at run
-# time in :func:`_overflow_dir`.
-_SAME_FILESYSTEM_BACKENDS = frozenset({"native"})
-# Backends whose commands run on another machine entirely. Nothing on this
-# filesystem is nameable there, so spill advertises no path and the footer says
-# the remainder is unreadable rather than pointing somewhere that cannot resolve.
-_REMOTE_BACKENDS = frozenset({"e2b"})
-#: Stores this process created, so a discarded session can drop exactly its own
-#: recovery files. Replaces walking a directory tree looking for them: we delete
-#: only paths we made, which is why this needs no symlink or filesystem-root
-#: defence — the previous implementation walked a tree inside the agent's own
-#: workspace and had to assume it was hostile.
-_created_stores: set[Path] = set()
+#: Unscoped writes (no ExecutionScope) go to one store per PROCESS. The pid is
+#: part of the key because the default root is shared by every process of a
+#: uid: a constant key would merge two processes' unscoped stores, and either
+#: one's cleanup would delete the other's files.
+UNSCOPED_PROCESS_STORE = "__process__"
+#: Registry of the stores this process created — AgentCore's, shared by
+#: reference so a reset in tests affects the store's own bookkeeping too.
+_created_stores: set[Path] = SpillStore._created_stores
+#: parent scope key -> child scope keys entered from inside it (in-process
+#: sub-agents). A parent may read its children's stores — a fan-in report can
+#: carry a child's spill path back — but siblings never see each other's.
+_child_scopes: dict[str, set[str]] = {}
+_child_lock = threading.Lock()
+#: digest(preview text) -> ref of the FULL body behind it. Lets a later
+#: compaction of that preview point at the original full text instead of
+#: storing the preview and labelling it "[Full text]". Bounded; exact-match only,
+#: so an agent echoing part of a preview cannot claim someone else's ref.
+_preview_refs: OrderedDict[str, str] = OrderedDict()
+_PREVIEW_REFS_MAX = 4_096
 
 
-def _scope_component(task_id: str) -> str:
-    """Map an arbitrary task id to one safe, stable directory component."""
-    return hashlib.sha256(task_id.encode("utf-8")).hexdigest()[:16] if task_id else ""
+def spill_scope_key(task_id: str, llm_session_id: str = "") -> str:
+    """The store key for one conversation: ``task:session`` (or ``task``).
+
+    Built only from stable ids — never ``metadata["session_id"]``, which trace
+    plumbing may replace mid-run.
+    """
+    task_id = str(task_id or "")
+    session = str(llm_session_id or "")
+    if not task_id:
+        return ""
+    return f"{task_id}:{session}" if session else task_id
+
+
+def _scope_key_of(scope: object | None) -> str:
+    if scope is None:
+        return ""
+    metadata = getattr(scope, "metadata", None) or {}
+    return spill_scope_key(
+        str(getattr(scope, "task_id", "") or ""),
+        str(metadata.get("llm_session_id") or ""),
+    )
 
 
 def _current_task_id() -> str:
+    """The current ExecutionScope's store key, or "" outside any scope."""
     from frontier_agent.core.execution_context import get_current_execution_scope
 
-    scope = get_current_execution_scope()
-    if scope is None:
-        return ""
-    task_id = str(scope.task_id or "")
-    session_id = str(scope.metadata.get("llm_session_id") or "")
-    # This is a per-conversation overflow cache, not cross-session memory.
-    return f"{task_id}:{session_id}" if session_id else task_id
+    return _scope_key_of(get_current_execution_scope())
+
+
+def current_store_scope() -> str:
+    """The ONE scope key writers, the mount and read authorization share."""
+    return _current_task_id() or f"{UNSCOPED_PROCESS_STORE}:{os.getpid()}"
+
+
+def register_child_scope(parent: object | None, child: object | None) -> None:
+    """Record that ``child``'s loop was entered from inside ``parent``'s."""
+    parent_key, child_key = _scope_key_of(parent), _scope_key_of(child)
+    if parent_key and child_key and parent_key != child_key:
+        with _child_lock:
+            _child_scopes.setdefault(parent_key, set()).add(child_key)
+
+
+def readable_scopes(scope: str | None = None) -> list[str]:
+    """Scope keys an agent may read: its own and its descendants'."""
+    root_key = current_store_scope() if scope is None else scope
+    out: list[str] = []
+    pending = [root_key]
+    with _child_lock:
+        while pending:
+            key = pending.pop()
+            if not key or key in out:
+                continue
+            out.append(key)
+            pending.extend(_child_scopes.get(key, ()))
+    return out
+
+
+def _physical_root() -> Path:
+    from plugins.tools._sandbox import spill_root
+
+    return spill_root().expanduser().resolve()
 
 
 def _resolved_backend() -> str:
     """The active backend as ``_sandbox`` resolves it, or "" when unresolvable.
 
     Reading ``SANDBOX_BACKEND`` straight from the environment misses a backend
-    supplied only through ``config.yaml`` — the resolver consults ``get_config()``
-    for exactly that case — and would then advertise ``/workspace/.spill/...``
-    for a run whose commands execute directly on the host filesystem, where that
-    literal path may name an unrelated directory. A misconfigured backend must
-    not take spill down with it: spill is a diagnostic aid, so fall back to the
-    conservative canonical mount rather than raising.
+    supplied only through ``config.yaml``. A misconfigured backend must not take
+    spill down with it, so an error resolves to "" (decided by bwrap below).
     """
     from plugins.tools._sandbox import _get_sandbox_backend
 
@@ -73,52 +128,103 @@ def _resolved_backend() -> str:
         return ""
 
 
-def _overflow_dir(task_id: str = "", *, create: bool = True) -> tuple[Path, str]:
-    """Return the physical write directory and the path visible to the agent.
+def _visible_root() -> str | None:
+    """How model commands can name the store, or ``None`` when they cannot.
 
-    ``create=False`` resolves the same location without touching the filesystem,
-    for callers that only want to inspect or remove an existing store.
-
-    This used to branch four ways over the workspace, the configured mount dir,
-    a run directory and a legacy host-only path, each with its own rule for what
-    the agent could name. The store now has one root outside every write root, so
-    the only remaining question is how a model command reaches it: directly under
-    ``native`` and ordinary ``container`` mode, through the read-only ``/spill``
-    mount under bwrap, and not at all from a remote backend.
+    Decided by the sandbox that ACTUALLY runs commands when one exists, then by
+    configuration: ``auto`` with an E2B key goes off-host, and a bwrap backend on
+    a host where bwrap cannot run has no ``/spill`` mount. Advertising a path in
+    either case would hand the model a ref it can never open — and would make
+    the compaction callback promise a recovery that does not exist.
     """
-    from plugins.tools._sandbox import _DEFAULT_SPILL_DIR, spill_root
+    from plugins.tools import _sandbox as sb
 
-    scope = _scope_component(task_id)
-    target = spill_root() / scope if scope else spill_root()
-    if create:
-        target.mkdir(parents=True, exist_ok=True)
-        # Readable and traversable by others, writable only by the harness. Set
-        # explicitly because this is the WHOLE enforcement under ``container``,
-        # where model commands are dropped to an unprivileged uid: they may read
-        # a 0644 spill file but cannot create or unlink inside a directory they
-        # do not own. Leaving it to the ambient umask would make that guarantee
-        # depend on whoever launched the process. bwrap gets a read-only mount
-        # instead (uid 0 in a user namespace ignores DAC); ``native`` has no
-        # isolation to enforce anything with.
-        with contextlib.suppress(OSError):
-            target.chmod(0o755)
-        _created_stores.add(target)
+    live = sb.get_existing_sandbox()
+    if isinstance(live, sb.BwrapSandbox):
+        return sb._DEFAULT_SPILL_DIR
+    if isinstance(live, sb.CurrentSandbox):
+        return sb._DEFAULT_SPILL_DIR if live._inner is not None else str(_physical_root())
+    if live is not None and type(live).__module__.split(".", 1)[0].startswith("e2b"):
+        return None
 
     backend = _resolved_backend()
-    if backend in _REMOTE_BACKENDS:
-        return target, ""
-    if backend in _SAME_FILESYSTEM_BACKENDS:
-        return target, str(target)
+    if backend == "e2b":
+        return None
+    if backend == "native":
+        return str(_physical_root())
     if backend == "container":
-        # Production CurrentSandbox explicitly runs without a mount namespace;
-        # advertising /spill there points at nothing because the physical store
-        # is normally under /tmp or the run directory. Only the optional inner
-        # bwrap path creates the canonical read-only /spill mount.
-        from plugins.tools._sandbox import container_uses_inner_bwrap
+        return sb._DEFAULT_SPILL_DIR if sb.container_uses_inner_bwrap() else str(_physical_root())
+    if backend == "auto":
+        try:
+            use_e2b = sb._resolve_use_e2b()[0]
+        except Exception:
+            use_e2b = False
+        if use_e2b:
+            return None
+    return sb._DEFAULT_SPILL_DIR if sb.bwrap_available() else None
 
-        if not container_uses_inner_bwrap():
-            return target, str(target)
-    return target, f"{_DEFAULT_SPILL_DIR}/{scope}" if scope else _DEFAULT_SPILL_DIR
+
+def _store(scope: str | None = None) -> SpillStore:
+    """The SpillStore for ``scope`` (default: the current one)."""
+    return SpillStore(
+        _physical_root(),
+        current_store_scope() if scope is None else scope,
+        visible_root=_visible_root(),
+    )
+
+
+def spill_is_recoverable() -> bool:
+    """Whether a compaction spill would produce a ref the agent can open."""
+    return _visible_root() is not None
+
+
+def default_compaction_spill() -> Callable[[str, str], str | None] | None:
+    """The compaction spill callback, or ``None`` when nothing is recoverable.
+
+    AgentCore cannot introspect a plain function, so it takes any callback as a
+    promise that discarded bodies stay recoverable and drops its guard that
+    keeps the newest unseen results verbatim. Withholding the callback is how a
+    backend without a readable store keeps that guard.
+    """
+    return spill_compacted_body if spill_is_recoverable() else None
+
+
+def readable_store_dirs() -> list[Path]:
+    """Physical directories of :func:`readable_scopes` this process created."""
+    root = _physical_root()
+    dirs: list[Path] = []
+    for key in readable_scopes():
+        directory = root / scope_component(key)
+        if directory in _created_stores and directory.is_dir():
+            dirs.append(directory)
+    return dirs
+
+
+def spill_bind_args() -> list[str]:
+    """bwrap args mounting ONLY the readable scopes under ``/spill``.
+
+    Built per command from the current scope, so a shared or pooled jail still
+    shows each agent just its own store (and its sub-agents'). ``--ro-bind-try``
+    because a store is created lazily on the first spill.
+    """
+    from plugins.tools._sandbox import _DEFAULT_SPILL_DIR
+
+    root = _physical_root()
+    args = ["--dir", _DEFAULT_SPILL_DIR]
+    for key in readable_scopes():
+        component = scope_component(key)
+        args.extend([
+            "--ro-bind-try", str(root / component), f"{_DEFAULT_SPILL_DIR}/{component}",
+        ])
+    return args
+
+
+def _overflow_dir(task_id: str = "", *, create: bool = True) -> tuple[Path, str]:
+    """Physical directory and agent-visible path of one scope's store."""
+    store = _store(task_id or current_store_scope())
+    if create:
+        store.ensure()
+    return store.directory, store.visible_directory
 
 
 def body_names_a_spill_file(body: str) -> bool:
@@ -126,19 +232,8 @@ def body_names_a_spill_file(body: str) -> bool:
 
     A presence test against the two roots the store can be named by — the
     canonical mount and the physical path — not a parse of the pointer's prose.
-    The wording differs per backend and per caller, and ``7cf9188`` moved
-    deliberately away from recognising spill refs by shape.
-
-    Deliberately does NOT go through :func:`agent_visible_spill_dir`, which
-    resolves via ``_overflow_dir`` and would CREATE the store as a side effect of
-    asking a read-only question.
-
-    Exists so the site-3 recovery footer can stay quiet when it would be
-    redundant. Measured on a live agent-team run: every result site 3 shortened
-    was a ``bash`` result that already carried a spill pointer, and the spill file
-    behind it held the FULL pre-gate-① output — 42,770 chars against the 8,000 the
-    model saw. The agent read those files with ``cat`` and never called the tool
-    the footer named. Two routes to the same bytes, and the footer lost.
+    Exists so the trajectory recovery footer can stay quiet when it would be
+    redundant: the spill file already holds the full output.
     """
     if not body:
         return False
@@ -148,8 +243,7 @@ def body_names_a_spill_file(body: str) -> bool:
     with contextlib.suppress(Exception):
         roots.append(str(spill_root()))
     # The separator is not cosmetic: a bare ``"/spill" in body`` also fires on
-    # ``/spillover``, and a pointer always names a FILE under the store, so the
-    # trailing slash is both stricter and exactly what a real pointer contains.
+    # ``/spillover``, and a pointer always names a FILE under the store.
     return any(
         root and f"{root.rstrip('/')}/" in body for root in roots
     )
@@ -157,7 +251,7 @@ def body_names_a_spill_file(body: str) -> bool:
 
 def agent_visible_spill_dir() -> str:
     """Return the spill directory as tools should name it, or empty if unreadable."""
-    return _overflow_dir(_current_task_id())[1]
+    return _overflow_dir(current_store_scope())[1]
 
 
 # Smallest inline preview worth keeping. A cap tighter than
@@ -284,52 +378,48 @@ def budgeted_preview(
 def _write_spill(
     tool_name: str, body: str, *, require_visible: bool, task_id: str = "",
 ) -> tuple[Path, str] | None:
-    """Persist ``body`` once and return its path plus the agent-visible ref.
+    """Persist ``body`` once through the scope's SpillStore.
 
-    Named by ``sha256(tool_name, body)`` rather than a fresh uuid so re-spilling
-    the SAME body is idempotent. Tier 2 re-spills every protected fan-in result
-    on each pass that wins, which under a uuid name left one identical copy per
-    compaction on disk and burned a manifest slot each time.
-
-    Returns ``None`` when the store is unreachable, or when the caller requires
-    an agent-visible path and this backend cannot name one.
+    Content-addressed (``sha256(tool_name, body)``) so re-spilling the SAME body
+    is idempotent. Returns ``None`` when the store is unreachable, or when the
+    caller requires an agent-visible path and this backend cannot name one.
     """
-    write_dir, visible_dir = _overflow_dir(task_id or _current_task_id())
-    if require_visible and not visible_dir:
+    try:
+        store = _store(task_id or current_store_scope())
+        return store.write(tool_name, body, require_visible=require_visible)
+    except OSError as exc:
+        logger.warning("Failed to spill %s result: %s", tool_name, exc)
         return None
-    digest = hashlib.sha256(
-        tool_name.encode("utf-8") + b"\x00" + body.encode("utf-8", "replace"),
-    ).hexdigest()[:16]
-    path = write_dir / f"{digest}.md"
-    if not path.exists():
-        # Write-then-rename: a crash mid-write would otherwise leave a truncated
-        # file under the name the digest resolves to, which ``path.exists()``
-        # then treats as a complete spill forever.
-        tmp = path.with_name(f".{digest}.{uuid.uuid4().hex[:8]}.tmp")
-        try:
-            tmp.write_text(_spill_document(tool_name, digest, body), encoding="utf-8")
-            os.replace(tmp, path)
-        except OSError as exc:
-            logger.warning("Failed to spill %s result: %s", tool_name, exc)
-            with contextlib.suppress(OSError):
-                tmp.unlink()
-            return None
-    return path, (f"{visible_dir}/{path.name}" if visible_dir else "")
 
 
-def _spill_document(tool_name: str, spill_id: str, result: str) -> str:
-    """Use grep-friendly markdown and keep the captured body verbatim.
+def _preview_key(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8", "replace")).hexdigest()
 
-    ``spill_id`` is the content digest, not a call id: the same body spilled
-    twice is one file, so no single call owns it.
-    """
-    return (
-        f"# {tool_name} — spilled tool result\n\n"
-        f"- id: `{spill_id}`\n"
-        f"- captured: {time.strftime('%Y-%m-%dT%H:%M:%S%z')}\n"
-        f"- length: {len(result):,} chars"
-        f"{_SPILL_SEPARATOR}{result}"
-    )
+
+def remember_preview(preview: str, ref: str) -> None:
+    """Record that ``preview`` stands for the full body stored at ``ref``."""
+    if not preview or not ref:
+        return
+    key = _preview_key(preview)
+    with _child_lock:
+        _preview_refs[key] = ref
+        _preview_refs.move_to_end(key)
+        while len(_preview_refs) > _PREVIEW_REFS_MAX:
+            _preview_refs.popitem(last=False)
+
+
+def _full_body_ref(body: str) -> str:
+    """The ref of the full body ``body`` is a preview of, if it is still readable."""
+    with _child_lock:
+        ref = _preview_refs.get(_preview_key(body), "")
+    if not ref:
+        return ""
+    store = _store()
+    for key in readable_scopes():
+        candidate = SpillStore(store.root, key, visible_root=store.visible_root)
+        if candidate.contains_path(ref) and candidate.read(ref) is not None:
+            return ref
+    return ""
 
 
 def _spill_footer(ref: str, *, full_len: int, note: str = "") -> str:
@@ -360,9 +450,17 @@ def _spill_footer(ref: str, *, full_len: int, note: str = "") -> str:
 
 
 def spill_compacted_body(tool_name: str, body: str) -> str | None:
-    """Persist a result immediately before compaction discards its inline body."""
+    """Persist a result immediately before compaction discards its inline body.
+
+    When ``body`` is itself a preview this module produced, the ref of the full
+    body behind it is returned instead: storing the preview would label a cut
+    copy "[Full text]" and orphan the real one.
+    """
     if len(body) < _SPILL_MIN_CHARS:
         return None
+    existing = _full_body_ref(body)
+    if existing:
+        return existing
     spilled = _write_spill(tool_name, body, require_visible=True)
     return spilled[1] if spilled else None
 
@@ -379,17 +477,17 @@ def maybe_overflow(
     Args:
         tool_name: Name of the tool that produced the result.
         result: The full tool result string.
-        task_id: Optional task ID for organizing overflow files. Defaults to
-            the current execution scope. Pass the SAME composite form the scope
-            uses (``f"{task_id}:{llm_session_id}"``) or the store will not be
-            the one ``cleanup_overflow`` removes.
+        task_id: Optional store key. Defaults to :func:`current_store_scope`;
+            pass the SAME ``spill_scope_key`` form or the store will not be the
+            one the mount and read authorization expose.
         call_id: Accepted for backwards compatibility and no longer used to name
-            the file — see :func:`_write_spill` on content-hash naming.
+            the file — the store is content-addressed.
 
     Returns:
         The original result if within limits, or a head-and-tail preview with a
         reference to the overflow file, together no longer than the cap.
     """
+    del call_id
     meta = get_tool_meta(tool_name)
 
     # 0 means no limit
@@ -399,8 +497,10 @@ def maybe_overflow(
     if len(result) <= meta.max_result_chars:
         return result
 
+    # ``require_visible``: a backend that cannot name the store (E2B) gets no
+    # file at all — one written on this host would be unreachable forever.
     spilled = _write_spill(
-        tool_name, result, require_visible=False, task_id=task_id,
+        tool_name, result, require_visible=True, task_id=task_id,
     )
     if spilled is not None:
         logger.info(
@@ -410,9 +510,11 @@ def maybe_overflow(
     # A failed write only costs the pointer: the footer then says the remainder
     # is unreadable instead of naming a path that does not exist.
     ref = spilled[1] if spilled else ""
-    return budgeted_preview(
+    preview = budgeted_preview(
         result, cap=meta.max_result_chars, ref=ref, tool_name=tool_name,
     )
+    remember_preview(preview, ref)
+    return preview
 
 
 # ── Aggregate budget (per-turn total) ───────────────────────────────────
@@ -480,6 +582,9 @@ def check_aggregate_budget(
             note="Cut further to fit the per-turn tool-result budget.",
             tool_name=name,
         )
+        # A re-cut preview still stands for the ORIGINAL full body when the
+        # input was already one of ours.
+        remember_preview(replacement, _full_body_ref(result) or (spilled[1] if spilled else ""))
         total -= len(result) - len(replacement)
         adjusted[idx] = replacement
 
@@ -487,28 +592,18 @@ def check_aggregate_budget(
 
 
 def get_overflow_content(overflow_path: str) -> str | None:
-    """Read the full content from an overflow file.
+    """Read the full content from a spill file this conversation may read.
 
-    Args:
-        overflow_path: Path to the overflow JSON file.
-
-    Returns:
-        The full tool result content, or None if not found.
+    Accepts a physical path or the agent-visible ref. Only the current scope's
+    store, its sub-agents' stores, or (for a physical path) a store this
+    process created are consulted — never an arbitrary file.
     """
-    path = Path(overflow_path)
-    if not path.is_file():
-        return None
-
-    try:
-        text = path.read_text(encoding="utf-8")
-        if _SPILL_SEPARATOR in text:
-            return text.split(_SPILL_SEPARATOR, 1)[1]
-        # Backward compatibility for sessions holding pointers to old JSON spills.
-        data = json.loads(text)
-        return data.get("content")
-    except Exception as e:
-        logger.warning("Failed to read overflow file %s: %s", overflow_path, e)
-        return None
+    store = _store()
+    for key in readable_scopes():
+        candidate = SpillStore(store.root, key, visible_root=store.visible_root)
+        if candidate.contains_path(overflow_path):
+            return candidate.read(overflow_path)
+    return SpillStore.read_created(overflow_path)
 
 
 def cleanup_overflow(
@@ -519,15 +614,10 @@ def cleanup_overflow(
     """Remove the spilled tool results of one finished conversation.
 
     Args:
-        scope: The store to remove, in the SAME composite form the writers use —
-            ``f"{task_id}:{llm_session_id}"``, which is what
-            :func:`_current_task_id` returns. A bare ``task_id`` hashes to a
-            different directory and would silently match nothing, since
-            ``llm_session_id`` defaults to ``task_id`` rather than staying empty.
-            Omit it to clean up the caller's own current scope. An explicitly
-            empty string is always a safe no-op.
+        scope: The store key, in :func:`spill_scope_key` form. Omit it to clean
+            up the caller's own current scope. An explicitly empty string is
+            always a safe no-op.
         workspace: Ignored, kept so existing teardown calls still type-check.
-            The store no longer lives under a workspace.
 
     Returns:
         Number of files removed.
@@ -535,48 +625,41 @@ def cleanup_overflow(
     del workspace
     if scope == "":
         return 0
-    resolved_scope = _current_task_id() if scope is None else scope
+    resolved_scope = current_store_scope() if scope is None else scope
     if not resolved_scope:
         return 0
+    removed = SpillStore(_physical_root(), resolved_scope).cleanup()
+    with _child_lock:
+        _child_scopes.pop(resolved_scope, None)
+    return removed
 
-    # ``create=False``: resolving a store in order to delete it must not first
-    # bring it into existence, which would also leave a stray empty directory
-    # behind for any scope that never spilled.
-    return _remove_store(_overflow_dir(resolved_scope, create=False)[0])
 
+def cleanup_overflow_tree(scope: str | None = None) -> int:
+    """Remove one conversation's store and every sub-agent store under it.
 
-def _remove_store(store: Path) -> int:
-    """Delete one store directory's files, then the directory. Count the files."""
-    if not store.is_dir():
-        return 0
-    count = 0
-    for entry in store.iterdir():
-        try:
-            entry.unlink()
-            count += 1
-        except OSError:
-            pass
-    with contextlib.suppress(OSError):
-        store.rmdir()
-    _created_stores.discard(store)
-    return count
+    Only stores this process created are touched, so another process — or an
+    unrelated session in this one — keeps its files.
+    """
+    keys = readable_scopes(scope)
+    root = _physical_root()
+    removed = 0
+    for key in keys:
+        if root / scope_component(key) in _created_stores:
+            removed += SpillStore(root, key).cleanup()
+        with _child_lock:
+            _child_scopes.pop(key, None)
+    return removed
 
 
 def cleanup_overflow_process() -> int:
     """Remove every store THIS process created.
 
-    For a discarded conversation: the TUI's ``/clear`` and ``/mode`` drop all
-    history that could reference a spill path, so the files it named are dead.
-
-    PRECONDITION: one conversation per process, which holds for the only caller —
-    the terminal app — and for the benchmark runner's subprocess-per-question. A
-    server multiplexing concurrent sessions in one process must NOT use this; it
-    would delete a live session's recovery files. Such a caller wants
-    :func:`cleanup_overflow` per scope instead.
-    Scoped to what this process created rather than to a directory tree, which
-    is both safer — another session's store is not ours to delete, whatever it
-    is next to — and simpler, since deleting only paths we made needs none of
-    the symlink and filesystem-root defences that walking the agent's workspace
-    required.
+    For a discarded conversation in a one-conversation process: the TUI's
+    ``/clear`` and ``/mode`` drop all history that could reference a spill path.
+    A server multiplexing concurrent sessions in one process must use
+    :func:`cleanup_overflow_tree` per conversation instead.
     """
-    return sum(_remove_store(store) for store in list(_created_stores))
+    with _child_lock:
+        _child_scopes.clear()
+        _preview_refs.clear()
+    return SpillStore.cleanup_process()

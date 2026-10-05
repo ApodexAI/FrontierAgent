@@ -1050,14 +1050,14 @@ async def react_agent_node(state: dict[str, Any], ctx: NodeContext) -> dict[str,
     if context_compaction == "tiered" and max_len > 0:
         gauge = InputTokenGauge()
         observers.append(gauge)
-        from plugins.tools._overflow import spill_compacted_body
+        from plugins.tools._overflow import default_compaction_spill
 
         compactor: Any = TieredCompactor(
             keep_tool_result=tier1_keep_tool_result,
             summary_llm=llm,
             relief_target=int(max_len * 0.6),
             gauge=gauge,  # calibrate relief to real tokens (unit-match trigger)
-            spill=spill_compacted_body if compaction_spill else None,
+            spill=default_compaction_spill() if compaction_spill else None,
             summary_retry_timeout_s=llm_timeout,
         )
         compaction_policy = InputTokenThresholdPolicy(
@@ -1125,6 +1125,14 @@ async def react_agent_node(state: dict[str, Any], ctx: NodeContext) -> dict[str,
         # Drop this run's task board (no-op when task_board is off) so boards
         # don't leak across trials in a long-lived worker process.
         clear_board(ctx.task_id)
+        # Same for its spilled tool results: finalization ran inside the loop,
+        # so nothing can name them any more. Only stores this process created
+        # under this run's scope are removed.
+        from plugins.tools._overflow import cleanup_overflow_tree, spill_scope_key
+
+        cleanup_overflow_tree(spill_scope_key(
+            ctx.task_id, str(metadata.get("session_id") or ctx.task_id),
+        ))
         kill = getattr(sandbox, "kill", None)
         if callable(kill):
             kill()

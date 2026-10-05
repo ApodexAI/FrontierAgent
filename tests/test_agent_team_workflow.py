@@ -343,37 +343,61 @@ def test_spill_cd_refusal_explains_the_real_reason() -> None:
     assert "read-only recovery store" in error
 
 
-def test_bwrap_mounts_the_spill_store_read_only(tmp_path, monkeypatch) -> None:
+def test_bwrap_mounts_only_the_current_scopes_spill_store_read_only(tmp_path, monkeypatch) -> None:
     """The lexical gate cannot be the only layer protecting recovery files.
 
-    The bash token scan refuses every parseable way to write into the store, but
-    shell expansion can hide a path from any scanner (a glob, a brace, a ``$VAR``
-    assembled in pieces, a ``$(…)`` substitution), and the files are ordinary 0644
-    files. File modes cannot close it either — model commands run as uid 0 inside
-    the user namespace, so DAC is never consulted. A mount is.
-
-    The mount is now a sibling of ``/workspace`` rather than a remount inside it,
-    which is what let the ordering requirement go: the source no longer overlaps
-    any writable bind, so it does not have to come last to win.
+    Shell expansion can hide a path from any scanner, and model commands run as
+    uid 0 inside the user namespace, so DAC is never consulted. A read-only
+    mount is. It is resolved PER COMMAND from the current scope — one jail serves
+    many agents — and exposes that scope's store and its sub-agents' only, never
+    the shared root (where ``ls /spill`` would enumerate every conversation).
     """
-    from plugins.tools import _sandbox
+    from frontier_agent.core.execution_context import (
+        ExecutionScope,
+        reset_current_execution_scope,
+        set_current_execution_scope,
+    )
+    from plugins.tools import _overflow, _sandbox
 
     monkeypatch.setattr(_sandbox, "bwrap_available", lambda: True)
     monkeypatch.setenv("APODEX_SPILL_DIR", str(tmp_path / "store"))
     workspace = tmp_path / "ws"
 
     sandbox = _sandbox.BwrapSandbox(workspace=workspace)
-    args = sandbox.commands._bind_args
+    assert str(tmp_path / "store") not in sandbox.commands._bind_args
 
-    spill_at = args.index("--ro-bind-try")
-    assert args[spill_at + 1] == str(tmp_path / "store")
-    assert args[spill_at + 2] == "/spill"
-    # Outside the workspace, so nothing above it overlaps.
-    assert not str(tmp_path / "store").startswith(str(workspace))
-    # ``--ro-bind-try``, not ``--ro-bind``: the store is created lazily on the
-    # first spill and bwrap aborts the jail when a --ro-bind source is missing.
-    assert "--ro-bind" not in args[spill_at:spill_at + 1]
-    assert not (workspace / ".spill").exists()
+    parent = ExecutionScope(task_id="T", metadata={"llm_session_id": "main"})
+    child = ExecutionScope(task_id="T", metadata={"llm_session_id": "sub-a"})
+    sibling = ExecutionScope(task_id="T", metadata={"llm_session_id": "sub-b"})
+    _overflow.register_child_scope(parent, child)
+    _overflow.register_child_scope(parent, sibling)
+    root = (tmp_path / "store").resolve()
+
+    def mounts_as(scope: ExecutionScope) -> dict[str, str]:
+        token = set_current_execution_scope(scope)
+        try:
+            args = _sandbox._spill_mount_args()
+        finally:
+            reset_current_execution_scope(token)
+        assert args[:2] == ["--dir", "/spill"]
+        assert "--bind" not in args and "--ro-bind" not in args
+        return {
+            args[i + 2]: args[i + 1]
+            for i, a in enumerate(args) if a == "--ro-bind-try"
+        }
+
+    def comp(scope: ExecutionScope) -> str:
+        return _overflow.scope_component(_overflow._scope_key_of(scope))
+
+    try:
+        assert mounts_as(child) == {f"/spill/{comp(child)}": str(root / comp(child))}
+        assert set(mounts_as(parent)) == {
+            f"/spill/{comp(s)}" for s in (parent, child, sibling)
+        }
+        assert str(root) not in mounts_as(child).values()
+        assert not str(root).startswith(str(workspace))
+    finally:
+        _overflow._child_scopes.clear()
 
 
 def test_the_shipped_writer_agrees_with_the_authoritative_spill_rule(

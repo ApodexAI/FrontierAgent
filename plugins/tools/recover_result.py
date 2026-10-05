@@ -69,6 +69,16 @@ def _trajectory_path() -> Path | None:
     return Path(raw) if raw else None
 
 
+def trajectory_recovery_available() -> bool:
+    """Whether a handle minted now could ever resolve.
+
+    The trajectory observer advertises this agent's JSONL at loop start and
+    withdraws it when JSONL output is off; without it every ``recover_result``
+    call answers "unavailable", so the loop must not advertise one.
+    """
+    return _trajectory_path() is not None
+
+
 def _find_record(path: Path, turn: int, call_id: str) -> dict[str, Any] | None:
     """Last ``t:"result"`` record matching ``(turn, call_id)`` in this run.
 

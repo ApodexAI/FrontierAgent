@@ -170,8 +170,8 @@ def test_overflow_degrades_to_a_pointerless_footer_when_the_write_fails(
     from plugins.tools.meta import get_tool_meta
 
     monkeypatch.setattr(
-        _overflow, "_spill_document",
-        lambda *a, **k: (_ for _ in ()).throw(OSError("read-only fs")),
+        _overflow.SpillStore, "_document",
+        staticmethod(lambda *a, **k: (_ for _ in ()).throw(OSError("read-only fs"))),
     )
     cap = get_tool_meta("bash").max_result_chars
     body = _pytest_output(cap * 6)
