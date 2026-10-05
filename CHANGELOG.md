@@ -62,6 +62,20 @@ Initial open-source release of FrontierAgent.
 
 ### Fixed
 
+- **A write the path gate refused no longer reaches the host.** `write_file` and
+  `file_editor_create` fall back to the sandbox when local authorization fails,
+  and for the in-process `CurrentSandbox` that fallback is an `open()` in the
+  harness (as root, in container mode), so a refused path was written anyway.
+  That branch now authorizes the path itself; remote backends are unaffected.
+- **Paths are quoted before reaching a sandbox shell.** `file_editor`'s view /
+  create / str_replace commands, `write_file`'s `mkdir -p`, and the Docker
+  `mkdir -p` interpolated the path unquoted, so a path containing `;` ran
+  commands that never passed the bash policy.
+- **A system directory named as the workspace root grants nothing.** The root
+  arrives through `ExecutionScope` metadata (workload input), and
+  `{"workspace_root": "/etc"}` made `/etc` readable and writable. System roots
+  and direct children of `/usr` and `/etc` are refused; a run directory deep
+  under `/var` or `/opt` (a container volume, macOS `$TMPDIR`) still works.
 - Surface finalize-gate bypasses on the final turn: an answer delivered despite
   open task-board items now carries an unfinished-work note and a
   `finalize_gate_bypassed` marker instead of reading as a clean success.

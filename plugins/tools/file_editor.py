@@ -11,6 +11,7 @@ from plugins.tools._sandbox import (
     aget_sandbox,
     arun_sandbox_cmd,
     asandbox_write_file,
+    shell_quote,
 )
 
 logger = logging.getLogger(__name__)
@@ -78,17 +79,21 @@ async def file_editor_view(path: str, view_range: str = "") -> str:
     except RuntimeError as e:
         return f"Error: {e}"
 
+    # Every path below is interpolated into a shell command, so it is quoted
+    # once here: an unquoted path containing ``;`` or ``$(…)`` would run
+    # arbitrary commands in the sandbox without passing the bash policy.
+    q = shell_quote(path)
     try:
         check = await arun_sandbox_cmd(
             sandbox,
-            f"test -d {path} && echo DIR || echo FILE", timeout=10,
+            f"test -d {q} && echo DIR || echo FILE", timeout=10,
         )
         is_dir = "DIR" in check.stdout
 
         if is_dir:
             result = await arun_sandbox_cmd(
                 sandbox,
-                f"find {path} -maxdepth 2 -not -path '*/.git/*' "
+                f"find {q} -maxdepth 2 -not -path '*/.git/*' "
                 f"-not -path '*/node_modules/*' -not -path '*/__pycache__/*' "
                 f"| head -100 | sort",
                 timeout=15,
@@ -100,11 +105,11 @@ async def file_editor_view(path: str, view_range: str = "") -> str:
             parts = view_range.split("-")
             if len(parts) == 2:
                 start, end = parts[0].strip(), parts[1].strip()
-                cmd = f"sed -n '{start},{end}p' {path} | cat -n"
+                cmd = f"sed -n '{start},{end}p' {q} | cat -n"
             else:
-                cmd = f"cat -n {path}"
+                cmd = f"cat -n {q}"
         else:
-            cmd = f"cat -n {path}"
+            cmd = f"cat -n {q}"
 
         result = await arun_sandbox_cmd(sandbox, cmd, timeout=15)
 
@@ -156,7 +161,7 @@ async def file_editor_create(path: str, content: str) -> str:
         parent = os.path.dirname(path)
         if parent:
             await arun_sandbox_cmd(
-                sandbox, f"mkdir -p {parent}", timeout=10,
+                sandbox, f"mkdir -p {shell_quote(parent)}", timeout=10,
             )
 
         # Write via python in sandbox (avoids files.write permission issues)
@@ -165,7 +170,7 @@ async def file_editor_create(path: str, content: str) -> str:
             return f"Error creating {path}: {err}"
 
         result = await arun_sandbox_cmd(
-            sandbox, f"wc -l < {path}", timeout=5,
+            sandbox, f"wc -l < {shell_quote(path)}", timeout=5,
         )
         lines = result.stdout.strip() if result.stdout else "?"
 
@@ -232,7 +237,9 @@ async def file_editor_str_replace(path: str, old_str: str, new_str: str) -> str:
 
     try:
         # Read current content via cat (more reliable than files.read for all paths)
-        result = await arun_sandbox_cmd(sandbox, f"cat {path}", timeout=10)
+        result = await arun_sandbox_cmd(
+            sandbox, f"cat -- {shell_quote(path)}", timeout=10,
+        )
         if result.exit_code != 0:
             return f"Error: Cannot read {path}: {result.stderr or 'file not found'}"
         content = result.stdout

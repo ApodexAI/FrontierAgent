@@ -19,6 +19,7 @@ from plugins.tools._sandbox import (
     resolve_runtime_path,
     resolve_sandbox_mode,
     sandbox_available,
+    shell_quote,
 )
 
 logger = logging.getLogger(__name__)
@@ -75,7 +76,7 @@ async def write_file(path: str, content: str, append: bool = False) -> str:
             parent = os.path.dirname(path)
             if parent:
                 await arun_sandbox_cmd(
-                    sandbox, f"mkdir -p {parent}", timeout=10,
+                    sandbox, f"mkdir -p {shell_quote(parent)}", timeout=10,
                 )
 
             mode = "a" if append else "w"
