@@ -112,15 +112,6 @@ jobs:
           # was unusable (Ubuntu 24.04, for instance, restricts unprivileged
           # user namespaces through AppArmor).
           FRONTIER_AGENT_REQUIRE_BWRAP: "1"
-          # The runner refuses to bring up loopback inside a fresh network
-          # namespace ("bwrap: loopback: Failed RTM_NEWADDR: Operation not
-          # permitted"), which made ``bwrap_available()`` false and silently
-          # removed ALL real-jail coverage. This is the escape hatch the
-          # sandbox already documents for an outer container that rejects
-          # net-namespace creation. Mount isolation — what the spill tests
-          # check — is unaffected; network isolation is simply not exercised
-          # here, as it was not being exercised before either.
-          SANDBOX_UNSHARE_NET: "0"
         # ``-rs``: without it a skip is invisible in the log — only the count
         # changes, and the count is identical whether the jail test ran or was
         # skipped, so the log could not answer "did this actually run".
