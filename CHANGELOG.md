@@ -73,7 +73,13 @@ Initial open-source release of FrontierAgent.
   uses the argument set the sandbox actually runs and reports why it failed.
   CI sets `FRONTIER_AGENT_REQUIRE_BWRAP=1`, which turns such a skip into a
   failure, and runs pytest with `-rs` so a skip is visible in the log at all
-  (the pass/skip counts alone are identical either way).
+  (the pass/skip counts alone are identical either way). That flag immediately
+  showed the real-jail tests had never run on CI: the runner refuses to bring
+  up loopback in a fresh network namespace, which made `bwrap_available()`
+  false and removed every real-jail assertion. CI now also sets
+  `SANDBOX_UNSHARE_NET=0`, the escape hatch the sandbox already documents for
+  an outer container that rejects net-namespace creation, so mount isolation
+  is verified on every run.
 - Keep bash protection on resolved local system aliases such as macOS
   `/private/etc`, while exempting the run's own writable mounts. Recursive
   deletion and mutation refuse ancestors and wildcard selections of read-only
