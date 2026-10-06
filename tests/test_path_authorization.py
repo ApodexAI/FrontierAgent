@@ -375,6 +375,8 @@ def test_the_store_is_read_authorized_and_never_write_authorized(
     from plugins.tools._path_auth import _is_path_allowed
     from plugins.tools._sandbox import resolve_runtime_path
 
+    # This tests store access/cleanup, independently of host bwrap support.
+    monkeypatch.setenv("SANDBOX_BACKEND", "native")
     monkeypatch.setenv("APODEX_SPILL_DIR", str(tmp_path / "store"))
     token = set_current_execution_scope(
         ExecutionScope(task_id="t", metadata={"llm_session_id": "s"}),
@@ -415,6 +417,8 @@ def test_another_conversations_store_is_not_readable(tmp_path, monkeypatch) -> N
     from plugins.tools._path_auth import _is_path_allowed
 
     root = tmp_path / "store"
+    # This tests store access/cleanup, independently of host bwrap support.
+    monkeypatch.setenv("SANDBOX_BACKEND", "native")
     monkeypatch.setenv("APODEX_SPILL_DIR", str(root))
     saved = set(_overflow._created_stores)
     _overflow._created_stores.clear()
@@ -443,10 +447,11 @@ def test_another_conversations_store_is_not_readable(tmp_path, monkeypatch) -> N
         _overflow._created_stores.update(saved)
 
 
-def test_an_in_process_subagents_store_stays_readable(tmp_path, monkeypatch) -> None:
+def test_a_parent_reads_its_subagents_store_but_siblings_do_not(tmp_path, monkeypatch) -> None:
     """A sub-agent spills under its OWN scope, and a fan-in report can carry that
-    path back to the parent — so scope alone is too narrow. Stores this process
-    created are authorized too."""
+    path back to the parent — so the parent may read its children's stores. A
+    sibling sub-agent, or an unrelated conversation in this process, may not:
+    authorization follows the same scope tree the bwrap mount exposes."""
     from frontier_agent.core.execution_context import (
         ExecutionScope,
         reset_current_execution_scope,
@@ -454,33 +459,46 @@ def test_an_in_process_subagents_store_stays_readable(tmp_path, monkeypatch) -> 
     )
     from plugins.tools import _overflow
     from plugins.tools._path_auth import _is_path_allowed
+    from plugins.tools._sandbox import resolve_runtime_path
 
     monkeypatch.setenv("APODEX_SPILL_DIR", str(tmp_path / "store"))
+    monkeypatch.setattr(_overflow, "_visible_root", lambda: "/spill")
     saved = set(_overflow._created_stores)
     _overflow._created_stores.clear()
+    parent = ExecutionScope(task_id="T", metadata={"llm_session_id": "main"})
+    sub_a = ExecutionScope(task_id="T", metadata={"llm_session_id": "sub-a"})
+    sub_b = ExecutionScope(task_id="T", metadata={"llm_session_id": "sub-b"})
+    other = ExecutionScope(task_id="U", metadata={"llm_session_id": "main"})
+    _overflow.register_child_scope(parent, sub_a)
+    _overflow.register_child_scope(parent, sub_b)
+
+    def spill_as(scope: ExecutionScope) -> str:
+        token = set_current_execution_scope(scope)
+        try:
+            ref = _overflow.spill_compacted_body("collect_reports", f"{scope.metadata} " * 400)
+        finally:
+            reset_current_execution_scope(token)
+        assert ref
+        return resolve_runtime_path(ref)
+
+    def readable_as(scope: ExecutionScope, path: str) -> bool:
+        token = set_current_execution_scope(scope)
+        try:
+            return _is_path_allowed(path)[0]
+        finally:
+            reset_current_execution_scope(token)
+
     try:
-        token = set_current_execution_scope(
-            ExecutionScope(task_id="sub", metadata={"llm_session_id": "sub-s"}),
-        )
-        try:
-            sub_ref = _overflow.spill_compacted_body("collect_reports", "sub " * 400)
-        finally:
-            reset_current_execution_scope(token)
-        assert sub_ref
-
-        # Back in the parent's scope, the sub-agent's path is still readable.
-        token = set_current_execution_scope(
-            ExecutionScope(task_id="parent", metadata={"llm_session_id": "p-s"}),
-        )
-        try:
-            from plugins.tools._sandbox import resolve_runtime_path
-
-            assert _is_path_allowed(resolve_runtime_path(sub_ref))[0]
-        finally:
-            reset_current_execution_scope(token)
+        a_path, b_path = spill_as(sub_a), spill_as(sub_b)
+        assert readable_as(parent, a_path) and readable_as(parent, b_path)
+        assert readable_as(sub_a, a_path)
+        assert not readable_as(sub_a, b_path), "a sibling's store must stay closed"
+        assert not readable_as(sub_b, a_path)
+        assert not readable_as(other, a_path), "another conversation's store must stay closed"
     finally:
         _overflow._created_stores.clear()
         _overflow._created_stores.update(saved)
+        _overflow._child_scopes.clear()
 
 
 def test_every_write_guard_refuses_the_store(tmp_path, monkeypatch) -> None:

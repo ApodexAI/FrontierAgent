@@ -1089,7 +1089,7 @@ async def main_agent_node(
     main_keep_recent_msgs = max(6, int(agent_cfg.get("keep_recent_turns", 5)) * 3)
     main_compaction_policy: Any = None
     main_gauge: InputTokenGauge | None = None
-    from plugins.tools._overflow import spill_compacted_body
+    from plugins.tools._overflow import default_compaction_spill
 
     if context_compaction == "tiered" and max_len > 0:
         main_gauge = InputTokenGauge()
@@ -1102,7 +1102,7 @@ async def main_agent_node(
             relief_target=int(max_len * 0.6),
             protect_tool_names=PROTECTED_FANIN_TOOLS,
             gauge=main_gauge,  # calibrate relief to real tokens (unit-match trigger)
-            spill=spill_compacted_body if compaction_spill else None,
+            spill=default_compaction_spill() if compaction_spill else None,
             # Bound the whole retry sequence by what ONE summariser call was
             # already allowed to spend, so retrying costs no extra worst case.
             summary_retry_timeout_s=llm_timeout,

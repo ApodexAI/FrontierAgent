@@ -1117,7 +1117,7 @@ def build_swarm_session_runtime_spec(
     # is already reset by then and the list has to be handed over explicitly.
     _denials: dict[str, list[tuple[str, str]]] = {}
     _tiered = runtime.context_compaction == "tiered" and runtime.max_len > 0
-    from plugins.tools._overflow import spill_compacted_body
+    from plugins.tools._overflow import default_compaction_spill
 
     def _config(_job_id: str, item: SubTask, max_turns: int) -> LoopConfig:
         if _tiered:
@@ -1127,7 +1127,7 @@ def build_swarm_session_runtime_spec(
                 summary_llm=runtime.sub_agent_llm,
                 relief_target=int(runtime.max_len * 0.6),
                 gauge=gauge,  # calibrate relief to real tokens (unit-match trigger)
-                spill=spill_compacted_body if runtime.compaction_spill else None,
+                spill=default_compaction_spill() if runtime.compaction_spill else None,
                 summary_retry_timeout_s=(
                     runtime.sub_agent_llm_timeout or LoopConfig.llm_timeout
                 ),

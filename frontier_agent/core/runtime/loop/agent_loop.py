@@ -21,6 +21,7 @@ from agent_core.runtime.loop.agent_loop import (
 from frontier_agent.core.execution_context import (
     ExecutionScope,
     chain_fallback_active,
+    get_current_execution_scope,
     reset_current_execution_scope,
     set_current_execution_scope,
 )
@@ -49,13 +50,26 @@ def _enter_scope(
         phase_id=phase_id,
         metadata=metadata,
     )
+    # A loop entered from inside another (an in-process sub-agent) is that
+    # loop's child: the parent may read the child's spill store, siblings not.
+    from plugins.tools._overflow import register_child_scope
+
+    register_child_scope(get_current_execution_scope(), scope)
     return scope, set_current_execution_scope(scope)
 
 
 def _body_has_spill_reference(body: str) -> bool:
-    from plugins.tools._overflow import body_names_a_spill_file
+    """Whether the trajectory recovery footer should stay quiet for ``body``.
 
-    return body_names_a_spill_file(body)
+    True when the body already names a spill file (that file holds the full
+    output), and also when this agent has no trajectory JSONL: the footer names
+    ``recover_result``, which reads exactly that file, so without one it would
+    hand the model a handle that can only answer "unavailable".
+    """
+    from plugins.tools._overflow import body_names_a_spill_file
+    from plugins.tools.recover_result import trajectory_recovery_available
+
+    return body_names_a_spill_file(body) or not trajectory_recovery_available()
 
 
 def _with_recovery_handle(body: str, result: Any, turn: int, *, enabled: bool) -> str:

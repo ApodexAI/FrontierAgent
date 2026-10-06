@@ -62,6 +62,21 @@ def scope():
         reset_current_execution_scope(token)
 
 
+@pytest.fixture
+def traced(tmp_path):
+    """A scope whose trajectory JSONL is advertised, as the observer does at
+    loop start — the precondition for the footer to name ``recover_result``."""
+    sc = ExecutionScope(
+        task_id="t1", role_id="react",
+        metadata={TrajectoryFileObserver.SCOPE_KEY: str(tmp_path / "t1.jsonl")},
+    )
+    token = set_current_execution_scope(sc)
+    try:
+        yield sc
+    finally:
+        reset_current_execution_scope(token)
+
+
 def _ctx(turn: int) -> TurnContext:
     return TurnContext(
         turn=turn, max_turns=4, task_id="t1", role_id="react", ai_text="",
@@ -116,7 +131,7 @@ def _result(body: str, call_id: str = "call_7") -> ToolResult:
     )
 
 
-def test_footer_appears_only_when_content_was_actually_cut() -> None:
+def test_footer_appears_only_when_content_was_actually_cut(traced) -> None:
     full = "x" * 1_000
     assert "recover_result" in _with_recovery_handle(
         "x" * 400, _result(full), 3, enabled=True,
@@ -139,7 +154,7 @@ def test_no_footer_without_a_call_id() -> None:
     assert "recover_result" not in out
 
 
-def test_footer_names_the_turn_and_id_without_call_syntax() -> None:
+def test_footer_names_the_turn_and_id_without_call_syntax(traced) -> None:
     """The values must be exact, and the shape must not look like source.
 
     This asserted ``recover_result(turn=17, call_id="call_abc")`` verbatim until a
@@ -175,7 +190,7 @@ def test_no_footer_when_the_body_already_names_a_spill_file() -> None:
     assert out == body, "footer competed with a pointer that already covers the cut"
 
 
-def test_the_footer_still_fires_when_nothing_else_covers_the_cut() -> None:
+def test_the_footer_still_fires_when_nothing_else_covers_the_cut(traced) -> None:
     """The suppression must not swallow the case the tool exists for: a result cut
     below gate ① never reached the store, so no path names it."""
     body = "kept output with no pointer at all"
@@ -184,7 +199,7 @@ def test_the_footer_still_fires_when_nothing_else_covers_the_cut() -> None:
     assert "recover_result" in out
 
 
-def test_a_lookalike_directory_does_not_suppress_the_footer() -> None:
+def test_a_lookalike_directory_does_not_suppress_the_footer(traced) -> None:
     """``"/spill" in body`` also fires on ``/spillover``; a real pointer always
     names a file UNDER the store, so the separator is what distinguishes them."""
     body = "see /spillover/notes.md for context"
@@ -452,3 +467,9 @@ def test_a_subagent_recovers_the_body_its_own_scope_names(tmp_path) -> None:
 
     assert "SUBAGENT-BODY" in out
     assert "COORDINATOR-BODY" not in out
+
+
+def test_no_footer_when_no_trajectory_jsonl_is_written(scope) -> None:
+    """A handle into a JSONL nobody writes can only answer "unavailable"."""
+    full = "x" * 1_000
+    assert _with_recovery_handle("x" * 400, _result(full), 3, enabled=True) == "x" * 400
