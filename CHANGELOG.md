@@ -65,6 +65,15 @@ Initial open-source release of FrontierAgent.
 
 ### Fixed
 
+- **A skipped sandbox-isolation test can no longer pass for verification.**
+  The real-bubblewrap test's guard probed with `bwrap --ro-bind / / true`,
+  which fails on a *working* host — bwrap is not setuid, so without
+  `--unshare-user` it cannot get a mount namespace — and so "confirmed"
+  unavailability everywhere. The guard now calls the new `bwrap_probe()`, which
+  uses the argument set the sandbox actually runs and reports why it failed.
+  CI sets `FRONTIER_AGENT_REQUIRE_BWRAP=1`, which turns such a skip into a
+  failure, and runs pytest with `-rs` so a skip is visible in the log at all
+  (the pass/skip counts alone are identical either way).
 - Keep bash protection on resolved local system aliases such as macOS
   `/private/etc`, while exempting the run's own writable mounts. Recursive
   deletion and mutation refuse ancestors and wildcard selections of read-only

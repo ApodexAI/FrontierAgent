@@ -91,4 +91,13 @@ jobs:
       - name: Unit and exec-bundle tests
         env:
           SANDBOX_BACKEND: bwrap
-        run: uv run pytest -q
+          # This job installs bubblewrap, so a sandbox-isolation test that
+          # SKIPS here is a silent loss of coverage, not an inapplicable case.
+          # The flag turns such a skip into a failure that names why the jail
+          # was unusable (Ubuntu 24.04, for instance, restricts unprivileged
+          # user namespaces through AppArmor).
+          FRONTIER_AGENT_REQUIRE_BWRAP: "1"
+        # ``-rs``: without it a skip is invisible in the log — only the count
+        # changes, and the count is identical whether the jail test ran or was
+        # skipped, so the log could not answer "did this actually run".
+        run: uv run pytest -q -rs
