@@ -1767,7 +1767,7 @@ def test_download_file_target_is_the_resolved_destination(monkeypatch, tmp_path)
     assert "renamed" in named                   # collisions rename it
 
 
-# ── shared bash policy: always-denied groups go to the human, never auto ────��
+# ── shared bash policy: always-denied groups go to the human, never auto ─────
 
 
 @pytest.mark.parametrize("cmd", ["sudo systemctl restart x", "ssh host uptime", "pkill -f node"])

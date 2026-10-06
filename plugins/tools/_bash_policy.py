@@ -59,9 +59,9 @@ def set_policy_mode(mode: str) -> contextvars.Token:
     """
     if mode not in _VALID_MODES:
         logger.warning(
-            "ignoring unknown bash policy mode %r (expected one of %s); "
+            "ignoring unknown bash policy mode (expected one of %s); "
             "falling back to env / config / %s",
-            mode, ", ".join(_VALID_MODES), _DEFAULT_MODE,
+            ", ".join(_VALID_MODES), _DEFAULT_MODE,
         )
         return _policy_mode_var.set(None)
     return _policy_mode_var.set(mode)
