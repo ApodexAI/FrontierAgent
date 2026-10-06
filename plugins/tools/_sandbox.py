@@ -399,6 +399,16 @@ def _build_tool_env(
     # mode has no inner namespace). Measured on 4 concurrent sub-agents writing
     # ``/tmp/scratch.csv``: all four read back the last writer's content.
     projected["TMPDIR"] = tmpdir
+    # Name this run's directories for model-authored commands. Projected from
+    # the trusted state rather than inherited, so a stale ``OUTPUT_DIR`` from
+    # the harness environment cannot point a command at a previous session's
+    # directory; the explicit ``tmpdir`` argument still wins, since the caller
+    # may own a private scratch root the state does not know about.
+    from plugins.tools._filesystem_state import current_filesystem_state
+
+    for key, value in current_filesystem_state().shell_env().items():
+        if key != "TMPDIR":
+            projected[key] = value
     # Keep pip/matplotlib/caches inside a HOME the tool user owns. Without
     # these they target root-owned paths and fail with bare permission errors
     # the model cannot act on.
@@ -2329,17 +2339,16 @@ def resolve_sandbox_mode(agent_cfg: dict[str, Any] | None = None) -> str:
 
 
 def resolve_mount_dirs() -> tuple[str, str, str]:
-    """Return ``(workspace_dir, outputs_dir, inputs_dir)`` for container mode.
+    """Return ``(workspace_dir, outputs_dir, inputs_dir)`` for this run.
 
-    Defaults to the production mount points ``/workspace``, ``/outputs``,
-    ``/inputs``; each is overridable via ``FRONTIER_AGENT_WORKSPACE_DIR`` /
-    ``FRONTIER_AGENT_OUTPUTS_DIR`` / ``FRONTIER_AGENT_INPUTS_DIR`` so a local run
-    (no root) can point them at repo-relative dirs.
+    Now a thin read of :mod:`plugins.tools._filesystem_state`, which is the one
+    place these are derived (from the same ``FRONTIER_AGENT_*_DIR`` overrides
+    when no state is installed). Kept as a function because every existing
+    caller asks for exactly this triple.
     """
-    ws = os.environ.get("FRONTIER_AGENT_WORKSPACE_DIR", "").strip() or _DEFAULT_WORKSPACE_DIR
-    out = os.environ.get("FRONTIER_AGENT_OUTPUTS_DIR", "").strip() or _DEFAULT_OUTPUTS_DIR
-    inp = os.environ.get("FRONTIER_AGENT_INPUTS_DIR", "").strip() or _DEFAULT_INPUTS_DIR
-    return ws, out, inp
+    from plugins.tools._filesystem_state import current_filesystem_state
+
+    return current_filesystem_state().dirs()
 
 
 def spill_root() -> Path:

@@ -59,6 +59,7 @@ from frontier_agent.core.runtime.loop.tiered_compact import (
 )
 from frontier_agent.core.runtime.loop.tool_exec import ToolResultPostProcessor
 from frontier_agent.state.event_store.sqlite import EventStore
+from plugins.tools._filesystem_state import current_filesystem_state
 from plugins.tools.bash import BASH_STDERR_SEPARATOR
 from workflows.agent_team.identity import MAIN_AGENT_ID, SUB_ROLE_ID, llm_session_id
 from workflows.agent_team.stream_repetition import StreamRepetitionConfig
@@ -78,18 +79,12 @@ def render_sandbox_fs_note(
     """Render truthful filesystem context for the active sandbox topology."""
     shared = sandbox_mode in ("container", "native")
     location = "this native workspace" if sandbox_mode == "native" else "this container"
-    workspace_path = (
-        os.environ.get("FRONTIER_AGENT_WORKSPACE_DIR", "the workspace")
-        if sandbox_mode == "native" else "/workspace"
-    )
-    inputs_path = (
-        os.environ.get("FRONTIER_AGENT_INPUTS_DIR", "the inputs directory")
-        if sandbox_mode == "native" else "/inputs"
-    )
-    outputs_path = (
-        os.environ.get("FRONTIER_AGENT_OUTPUTS_DIR", "the outputs directory")
-        if sandbox_mode == "native" else "/outputs"
-    )
+    # The prompt names exactly the directories the file tools authorize and the
+    # shell variables point at, because all of them read this one state. Read
+    # from the environment per mode, these three could disagree with the tools:
+    # a relocated outputs directory outside native mode left the prompt saying
+    # ``/outputs`` while every writer used the override.
+    workspace_path, outputs_path, inputs_path = current_filesystem_state().dirs()
     project_path = os.environ.get("FRONTIER_AGENT_PROJECT_DIR", "").strip()
     if audience == "sub":
         workspace = (

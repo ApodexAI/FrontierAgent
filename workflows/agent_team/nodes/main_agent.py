@@ -73,6 +73,11 @@ from frontier_agent.core.runtime.session_history import build_session_turn
 from frontier_agent.models.node_context import NodeContext
 from frontier_agent.state.event_store.sqlite import EventStore
 from plugins.tools._coerce import coerce_json_list
+from plugins.tools._filesystem_state import (
+    install_filesystem_state,
+    reset_filesystem_state,
+    state_for_sandbox_mode,
+)
 from plugins.tools._sandbox import (
     BwrapSandbox,
     bwrap_available,
@@ -1060,16 +1065,6 @@ async def main_agent_node(
                 src = dataset_root / src
             input_sources.append(src)
         inputs_available = any(_has_input_files(str(src)) for src in input_sources)
-    main_fs_note = render_sandbox_fs_note(
-        sandbox_mode=sandbox_mode,
-        inputs_available=inputs_available,
-        audience="main",
-    )
-    sub_fs_note = render_sandbox_fs_note(
-        sandbox_mode=sandbox_mode,
-        inputs_available=inputs_available,
-        audience="sub",
-    )
     stream_repetition_config = parse_stream_repetition_config(agent_cfg)
     sub_agent_llm = llm
     llm, stream_repetition_observer = wrap_llm_for_stream_repetition(
@@ -1253,6 +1248,9 @@ async def main_agent_node(
     main_binds: tuple[tuple[str, str, bool], ...] = ()
     sub_binds: tuple[tuple[str, str, bool], ...] = ()
     shared_workspace_dir = ""
+    # Bound only on the container/native branch below, where the model sees the
+    # physical mounts; bwrap presents the canonical mount points instead.
+    outputs_dir = inputs_dir = ""
     if sandbox_mode in ("container", "native"):
         workspace_dir, outputs_dir, inputs_dir = resolve_mount_dirs()
         worktree_root = Path(workspace_dir)
@@ -1287,6 +1285,34 @@ async def main_agent_node(
                 if dst.startswith("/inputs")
             ]
         )
+
+    # One filesystem contract for this task, installed before any path
+    # question can be asked: the prompts, the shell variables, the file-tool
+    # permissions and the deliverable roots all read it instead of each
+    # re-deriving the directories from the environment. Sub-agents inherit it
+    # through the contextvar and narrow it to their own workspace.
+    fs_token = install_filesystem_state(state_for_sandbox_mode(
+        sandbox_mode,
+        workspace=str(worktree_root),
+        # Only the container/native branch above resolved physical mounts; for
+        # bwrap the model sees the canonical mount points, which
+        # ``state_for_sandbox_mode`` supplies on its own.
+        outputs=str(outputs_dir),
+        inputs=str(inputs_dir),
+    ))
+
+    # Render after installation: environment overrides may name host directories
+    # that bwrap exposes under entirely different, canonical mount paths.
+    main_fs_note = render_sandbox_fs_note(
+        sandbox_mode=sandbox_mode,
+        inputs_available=inputs_available,
+        audience="main",
+    )
+    sub_fs_note = render_sandbox_fs_note(
+        sandbox_mode=sandbox_mode,
+        inputs_available=inputs_available,
+        audience="sub",
+    )
 
     swarm_runtime = SwarmSubagentRuntime(
         original_question=question,
@@ -1548,6 +1574,7 @@ async def main_agent_node(
             turns=max_turns,
         )
 
+    reset_filesystem_state(fs_token)
     if main_sb_token is not None:
         clear_task_sandbox(main_sb_token)
     if reporter_enabled:

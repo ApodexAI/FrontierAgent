@@ -24,6 +24,7 @@ from frontier_agent.core.messages import (
 )
 from frontier_agent.core.runtime.loop.tool_exec import ToolResultPostProcessor
 from frontier_agent.infra.config import get_config
+from plugins.tools._filesystem_state import current_filesystem_state
 from plugins.tools.bash import BASH_STDERR_SEPARATOR
 from plugins.tools.document_node_toolchain import (
     render_document_node_toolchain_note,
@@ -81,9 +82,11 @@ def render_system_prompt_notes(
     filesystem_note = SANDBOX_FS_NOTE
     project = os.environ.get("FRONTIER_AGENT_PROJECT_DIR", "").strip()
     if sandbox_mode == "native":
-        workspace = os.environ.get("FRONTIER_AGENT_WORKSPACE_DIR", os.getcwd())
-        inputs = os.environ.get("FRONTIER_AGENT_INPUTS_DIR", "inputs")
-        outputs = os.environ.get("FRONTIER_AGENT_OUTPUTS_DIR", "outputs")
+        # The directories this run actually uses, from the one trusted state —
+        # the same object the file tools authorize against and the shell
+        # variables are projected from, so the prompt cannot name a path the
+        # tools would refuse.
+        workspace, outputs, inputs = current_filesystem_state().dirs()
         filesystem_note = (
             "\n\nFILESYSTEM CONVENTION (native mode): Your current working "
             f"directory {workspace} is the workspace. Read task inputs from "
@@ -96,7 +99,7 @@ def render_system_prompt_notes(
             "It will be placed in the workspace-local native dependency overlay."
         )
     if project:
-        workspace = os.environ.get("FRONTIER_AGENT_WORKSPACE_DIR", "/workspace")
+        workspace = current_filesystem_state().workspace
         if os.path.realpath(project) != os.path.realpath(workspace):
             filesystem_note += (
                 f" The user's project/coding directory is {project}; read or "

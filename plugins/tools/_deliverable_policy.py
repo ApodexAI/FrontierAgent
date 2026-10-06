@@ -48,28 +48,27 @@ _DEFAULT_SCRATCH_QUOTA_BYTES = 536_870_912  # 512 MiB
 def _runtime_outputs_root() -> str:
     """Return the filesystem output root visible to model tools.
 
-    Container and bwrap runs expose the canonical ``/outputs`` mount. Native
-    mode cannot create that top-level mount on hosts such as macOS (the root
-    filesystem is read-only), so its tools must use the run-local host path
-    exported by ``prepare_native_runtime`` instead.
+    Read from the trusted runtime state (see
+    :mod:`plugins.tools._filesystem_state`), which is also what the prompts
+    name and what ``_path_auth`` authorizes. It used to re-derive the root from
+    the environment and honour an override only under ``native``, so a
+    relocated outputs directory in container or bwrap mode left the prompt
+    saying ``/outputs`` while the file tools wrote somewhere this manifest never
+    recognised.
     """
-    backend = os.environ.get("SANDBOX_BACKEND", "").strip().lower()
-    if backend != "native" and os.environ.get("APODEX_IN_NATIVE") != "1":
-        return "/outputs"
-    configured = os.environ.get("FRONTIER_AGENT_OUTPUTS_DIR", "").strip()
-    if not configured or not os.path.isabs(configured):
-        return "/outputs"
-    return os.path.normpath(configured)
+    from plugins.tools._filesystem_state import DEFAULT_OUTPUTS_DIR, current_filesystem_state
+
+    return current_filesystem_state().outputs or DEFAULT_OUTPUTS_DIR
 
 
 def _runtime_workspace_root() -> str:
     """Return the filesystem workspace root visible to model tools."""
-    if _runtime_outputs_root() == "/outputs":
-        return "/workspace"
-    configured = os.environ.get("FRONTIER_AGENT_WORKSPACE_DIR", "").strip()
-    if not configured or not os.path.isabs(configured):
-        return "/workspace"
-    return os.path.normpath(configured)
+    from plugins.tools._filesystem_state import (
+        DEFAULT_WORKSPACE_DIR,
+        current_filesystem_state,
+    )
+
+    return current_filesystem_state().workspace or DEFAULT_WORKSPACE_DIR
 
 
 def _canonical_output_path(path: str) -> str:
@@ -572,7 +571,19 @@ def scratch_write_error() -> str | None:
 
 
 def output_write_error(path: str) -> str | None:
-    """Return an actionable error when ``path`` is not publishable."""
+    """Return an actionable error when ``path`` is not publishable.
+
+    The single check every file writer already makes, so the read-only input
+    contract is enforced here rather than being added to each of them (and
+    forgotten by the next writer).
+    """
+    from plugins.tools._filesystem_state import runtime_file_write_error
+    from plugins.tools._sandbox import resolve_runtime_path
+
+    # Check the target the writer will open, including canonical mount aliases.
+    # Otherwise /workspace/inputs/x bypasses a relocated read-only input root.
+    if error := runtime_file_write_error(resolve_runtime_path(path)):
+        return error
     if error := spill_write_error(path):
         return error
     normalised = _canonical_output_path(path)
