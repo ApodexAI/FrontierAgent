@@ -230,8 +230,12 @@ def test_an_echoed_fragment_of_a_preview_claims_no_ref(monkeypatch) -> None:
 # ── cross-scope access ───────────────────────────────────────────────────
 
 
-def test_a_siblings_ref_is_not_readable(monkeypatch) -> None:
-    _mounted(monkeypatch)
+@pytest.mark.parametrize("backend", ["bwrap", "native"])
+def test_a_siblings_ref_is_not_readable(monkeypatch, backend) -> None:
+    if backend == "native":
+        monkeypatch.setenv("SANDBOX_BACKEND", "native")
+    else:
+        _mounted(monkeypatch)
     parent, a, b = (ExecutionScope(task_id="T", metadata={"llm_session_id": s})
                     for s in ("main", "a", "b"))
     _overflow.register_child_scope(parent, a)

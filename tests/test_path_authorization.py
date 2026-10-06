@@ -375,6 +375,8 @@ def test_the_store_is_read_authorized_and_never_write_authorized(
     from plugins.tools._path_auth import _is_path_allowed
     from plugins.tools._sandbox import resolve_runtime_path
 
+    # This tests store access/cleanup, independently of host bwrap support.
+    monkeypatch.setenv("SANDBOX_BACKEND", "native")
     monkeypatch.setenv("APODEX_SPILL_DIR", str(tmp_path / "store"))
     token = set_current_execution_scope(
         ExecutionScope(task_id="t", metadata={"llm_session_id": "s"}),
@@ -415,6 +417,8 @@ def test_another_conversations_store_is_not_readable(tmp_path, monkeypatch) -> N
     from plugins.tools._path_auth import _is_path_allowed
 
     root = tmp_path / "store"
+    # This tests store access/cleanup, independently of host bwrap support.
+    monkeypatch.setenv("SANDBOX_BACKEND", "native")
     monkeypatch.setenv("APODEX_SPILL_DIR", str(root))
     saved = set(_overflow._created_stores)
     _overflow._created_stores.clear()

@@ -595,14 +595,17 @@ def get_overflow_content(overflow_path: str) -> str | None:
     """Read the full content from a spill file this conversation may read.
 
     Accepts a physical path or the agent-visible ref. Only the current scope's
-    store, its sub-agents' stores, or (for a physical path) a store this
-    process created are consulted — never an arbitrary file.
+    store and its sub-agents' stores are consulted. Outside an execution
+    scope, host diagnostics may also read physical paths this process created
+    — never an arbitrary file.
     """
     store = _store()
     for key in readable_scopes():
         candidate = SpillStore(store.root, key, visible_root=store.visible_root)
         if candidate.contains_path(overflow_path):
             return candidate.read(overflow_path)
+    if _current_task_id():
+        return None
     return SpillStore.read_created(overflow_path)
 
 
