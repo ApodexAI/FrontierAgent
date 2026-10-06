@@ -272,18 +272,27 @@ def _within_writable_root(path: str) -> bool:
     raw = path.strip().strip("'\"")
     if not raw.startswith("/") or _VAR_RE.search(raw):
         return False
-    candidates = _path_spellings(raw)
+    prefixes: set[str] = set()
     for root in _writable_roots():
-        roots = {root}
+        prefixes.add(_norm_target(root).rstrip("/") + "/")
         if _local_filesystem_paths():
             resolved_root = _real_path(root)
             if resolved_root:
-                roots.add(resolved_root)
-        for root_spelling in roots:
-            prefix = root_spelling.rstrip("/") + "/"
-            if any(candidate.startswith(prefix) for candidate in candidates):
-                return True
-    return False
+                prefixes.add(resolved_root.rstrip("/") + "/")
+    if not prefixes:
+        return False
+    # EVERY spelling must land inside a writable root, not merely one of them.
+    # ``/tmp`` is itself a writable root, so a symlink there pointing at
+    # ``/etc`` is textually contained; exempting it on that basis would retire
+    # the static protection altogether. Requiring both names keeps #589's case
+    # working — a file under a relocated outputs directory resolves to a file
+    # under the resolved outputs directory, and both roots are in this set —
+    # while a link that leads OUT of the run's directories is not exempt.
+    candidates = _path_spellings(raw)
+    return all(
+        any(candidate.startswith(prefix) for prefix in prefixes)
+        for candidate in candidates
+    )
 
 
 def _relocated_protected_roots() -> tuple[str, ...]:
@@ -303,30 +312,49 @@ def _relocated_protected_roots() -> tuple[str, ...]:
         return ()
 
 
-def _under_protected_root(path: str) -> bool:
-    """Whether ``path`` names a protected root, under any of its spellings.
+def _under_static_protected_root(path: str) -> bool:
+    """Whether ``path`` names one of the canonical system roots.
 
     ``_SYSTEM_ROOTS`` is matched AS WRITTEN and deliberately never resolved: on
     macOS ``/var`` resolves to ``/private/var``, which contains ``$TMPDIR`` and
-    would then swallow this run's own outputs. The run's own read-only mounts
-    are matched under both spellings, which can only add denials.
+    would then swallow this run's own outputs. Every SPELLING of the target is
+    checked, though, so ``/private/etc`` is recognised as ``/etc``.
+
+    Loses to :func:`_within_writable_root`: a run directory legitimately sits
+    under one of these prefixes.
     """
-    for candidate in _path_spellings(path):
-        if candidate in _PROTECTED_TARGETS or any(
+    return any(
+        candidate in _PROTECTED_TARGETS or any(
             candidate == root or candidate.startswith(root + "/")
             for root in _SYSTEM_ROOTS
-        ):
-            return True
+        )
+        for candidate in _path_spellings(path)
+    )
+
+
+def _under_run_read_only_root(path: str) -> bool:
+    """Whether ``path`` is inside one of THIS run's read-only mounts.
+
+    Wins over :func:`_within_writable_root`, which is the only ordering that
+    works: the inputs mount is frequently nested inside a writable root (a run
+    directory under ``$TMPDIR``, or anywhere under ``/tmp``), so an exemption
+    applied first would hand back the one directory holding the user's own
+    files — and it holds the only copy.
+    """
     for root in _relocated_protected_roots():
-        roots = {_norm_target(root), *(_path_spellings(root))}
-        for root_spelling in roots:
+        for root_spelling in {_norm_target(root), *_path_spellings(root)}:
+            prefix = root_spelling.rstrip("/")
             if any(
-                candidate == root_spelling
-                or candidate.startswith(root_spelling.rstrip("/") + "/")
+                candidate == prefix or candidate.startswith(prefix + "/")
                 for candidate in _path_spellings(path)
             ):
                 return True
     return False
+
+
+def _under_protected_root(path: str) -> bool:
+    """Whether ``path`` names a protected root, under any of its spellings."""
+    return _under_run_read_only_root(path) or _under_static_protected_root(path)
 
 
 def _is_delete_protected(arg: str) -> bool:
@@ -341,7 +369,16 @@ def _is_delete_protected(arg: str) -> bool:
         return True
     # The RAW argument, so ``_path_spellings`` can resolve it: ``_norm_target``
     # has already collapsed ``..``, which loses symlink-parent semantics.
-    if _under_protected_root(raw if raw.startswith("/") else a):
+    target = raw if raw.startswith("/") else a
+    if _under_run_read_only_root(target):
+        return True
+    # This run's own workspace/outputs stay clearable even when they sit under
+    # a protected prefix — ``rm -rf $OUTPUTS/stale`` with outputs under
+    # ``/var/folders/...`` is ordinary cleanup, and refusing it while ``find
+    # -delete`` on the same path was allowed only taught the model a detour.
+    if _within_writable_root(target):
+        return False
+    if _under_static_protected_root(target):
         return True
     # An absolute-looking path whose variables strip to a protected root:
     # ``/$X`` -> ``/``, ``/$SYS/…`` -> ``/etc``. Requires a leading ``/`` so a
@@ -654,6 +691,42 @@ def strip_command_prefixes(argv: list[str]) -> list[str]:
 _STDIN_DELETERS = frozenset({"rm", "rmdir", "unlink", "shred"})
 # ``find`` actions that run a command payload (analysed as a nested command).
 _FIND_EXEC_FLAGS = frozenset({"-exec", "-execdir", "-ok", "-okdir"})
+
+
+def _redirect_protection_reason(commands: list[list[str]]) -> str | None:
+    """Why an output redirection in ``commands`` must be refused, or ``None``.
+
+    The parsed counterpart of ``_REDIRECT_PROTECTED_RE``, and strictly stronger
+    than it in two ways the regex cannot reach, because it matches a LITERAL
+    prefix:
+
+    * a target that climbs out — ``> $OUTPUTS/../../../../etc/passwd`` begins
+      with this run's own directory, so the regex never looked at it, while
+      ``_norm_target`` collapses it to ``/etc/passwd``;
+    * this run's read-only mounts wherever they were mounted, which the regex's
+      fixed list of system roots does not know about.
+
+    Writable roots are exempt first (``_within_writable_root``), so a relocated
+    outputs directory under ``/var`` stays usable.
+    """
+    for argv in commands:
+        for raw_target in _redirect_targets(argv):
+            target = raw_target.strip().strip("'\"")
+            if not target.startswith("/") or _VAR_RE.search(target):
+                continue
+            if _REDIRECT_SAFE_DEVICE_RE.match(_norm_target(target)):
+                continue
+            # Read-only mounts first: see ``_under_run_read_only_root``.
+            if not _under_run_read_only_root(target) and _within_writable_root(target):
+                continue
+            if _under_protected_root(target):
+                writable = ", ".join(_writable_roots()) or "/workspace, /outputs or /tmp"
+                return (
+                    f"Refuses output redirection into a protected path "
+                    f"(`{target}`). Write to {writable} instead; "
+                    f"`>/dev/null` to discard is fine."
+                )
+    return None
 
 
 def _argv_hard_deny(commands: list[list[str]]) -> str | None:
@@ -2666,7 +2739,7 @@ def assess_bash_command(
         # This run's own writable directories, wherever they were mounted.
         # Containment is computed after ``..`` collapsing, so this cannot be
         # used to climb out of a writable root into a real system path.
-        if _within_writable_root(target):
+        if not _under_run_read_only_root(target) and _within_writable_root(target):
             continue
         # Name the directories this run actually has rather than the canonical
         # mounts: this text reaches the model right after it tried a path that
@@ -2694,6 +2767,10 @@ def assess_bash_command(
         argv_reason = _argv_hard_deny(commands)
         if argv_reason:
             return BashCommandAssessment(level="deny", reason=argv_reason)
+
+        redirect_reason = _redirect_protection_reason(commands)
+        if redirect_reason:
+            return BashCommandAssessment(level="deny", reason=redirect_reason)
 
         env_reason = _dynamic_env_split_reason(commands)
         if env_reason:

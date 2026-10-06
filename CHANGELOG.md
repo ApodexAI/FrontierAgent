@@ -62,6 +62,25 @@ Initial open-source release of FrontierAgent.
 
 ### Fixed
 
+- **Bash policy: this run's own writable mounts are no longer system paths.**
+  A redirect into a relocated outputs or workspace directory was refused by the
+  static `/var`, `/opt`, … prefixes — macOS `$TMPDIR` is `/var/folders/...`, a
+  container volume is `/var/lib/app/run` — while `tee` and `cp` to the same
+  path were allowed and the deny message recommended the very directory it had
+  just refused. The redirect target capture also no longer swallows an adjacent
+  redirect, so a writable target cannot hide `>/etc/passwd` behind it.
+- **Bash policy: paths are compared by identity, not spelling.** On a local
+  backend both the written and the resolved name are checked, so a read-only
+  input mount is protected under either (`rm -rf $(realpath …)`, `/private/etc`
+  for `/etc`), and a run's own directories stay clearable under either. A
+  read-only mount nested inside a writable root wins over the writable
+  exemption, and a symlink leading *out* of a writable root is not exempt.
+  Remote paths are never resolved with this host's `realpath`, and relative
+  operands are never resolved against the harness cwd.
+- Output redirections are additionally checked after parsing, so a target that
+  climbs out of a writable root (`> $OUTPUTS/../../../etc/passwd`) and a write
+  into a relocated read-only mount are both refused — neither begins with a
+  literal system prefix, so the raw regex never looked at them.
 - **One trusted runtime filesystem state** (`plugins/tools/_filesystem_state.py`).
   The workspace, outputs, inputs and scratch directories are derived once and
   read by everyone: mount resolution, the file-tool gate, the deliverable
