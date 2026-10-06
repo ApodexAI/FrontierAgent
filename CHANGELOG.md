@@ -62,19 +62,6 @@ Initial open-source release of FrontierAgent.
 
 ### Fixed
 
-- Spill recovery: oversized and compacted tool results are stored through
-  AgentCore's `SpillStore` (one store, one registry). A single scope key
-  (`task:llm_session`) now decides the store directory, the bwrap `/spill` mount
-  and read authorization: a jail sees only its own store and its sub-agents',
-  siblings and other conversations see nothing, and `_path_auth` no longer
-  authorizes every store the process created. A path is advertised only when
-  the backend actually running commands can open it (`auto` going to E2B, or
-  bwrap unusable, gets none), and the compaction spill callback is withheld
-  then. Compacting a truncated preview points at the original full body
-  instead of storing the preview as "[Full text]". The `recover_result` footer
-  is only shown when a trajectory JSONL exists. Known limitation: `container`
-  mode without the inner bwrap jail shares one tool uid, so model commands can
-  still read other scopes there.
 - Bash policy: privilege escalation (`sudo`/`su`/…), remote/exfil clients
   (`ssh`/`nc`/`rsync`/…) and signal senders (`kill`/`pkill`/`killall`) are now
   refused in every allowlist mode, including the default `off`. The local CLI
@@ -89,6 +76,19 @@ Initial open-source release of FrontierAgent.
   `reboot` are no longer refused, while `bash -c`, shell heredocs, pipes into a
   shell, evaluators (`watch`/`tmux`/…) and `systemctl` shutdown units still are.
   `DROP TABLE` keeps screening the whole text.
+- Spill recovery: oversized and compacted tool results are stored through
+  AgentCore's `SpillStore` (one store, one registry). A single scope key
+  (`task:llm_session`) now decides the store directory, the bwrap `/spill` mount
+  and read authorization: a jail sees only its own store and its sub-agents',
+  siblings and other conversations see nothing, and `_path_auth` no longer
+  authorizes every store the process created. A path is advertised only when
+  the backend actually running commands can open it (`auto` going to E2B, or
+  bwrap unusable, gets none), and the compaction spill callback is withheld
+  then. Compacting a truncated preview points at the original full body
+  instead of storing the preview as "[Full text]". The `recover_result` footer
+  is only shown when a trajectory JSONL exists. Known limitation: `container`
+  mode without the inner bwrap jail shares one tool uid, so model commands can
+  still read other scopes there.
 - Surface finalize-gate bypasses on the final turn: an answer delivered despite
   open task-board items now carries an unfinished-work note and a
   `finalize_gate_bypassed` marker instead of reading as a clean success.
