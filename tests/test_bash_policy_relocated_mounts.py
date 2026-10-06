@@ -250,14 +250,12 @@ def test_static_system_roots_are_matched_under_every_spelling(tmp_path) -> None:
         reset_filesystem_state(token)
 
 
-def test_the_canonical_roots_are_not_resolved(relocated) -> None:
-    """``/var`` must stay matched as written: resolved it becomes
-    ``/private/var`` on macOS, which contains ``$TMPDIR`` and would swallow
-    this run's own outputs."""
+def test_system_aliases_do_not_block_writable_mounts(relocated) -> None:
+    """Writable exemptions precede static checks, including resolved /var."""
     assert policy._under_static_protected_root("/var/log/syslog")
-    assert not policy._under_static_protected_root(
-        str(relocated["link"] / "outputs" / "a.md"),
-    )
+    target = str(relocated["link"] / "outputs" / "a.md")
+    assert policy._within_writable_root(target)
+    assert _level(f"echo x > {target}") == "allow"
 
 
 def test_a_symlink_out_of_a_writable_root_is_not_exempt(relocated, tmp_path) -> None:
@@ -277,3 +275,41 @@ def test_a_symlinked_writable_root_is_still_exempt(relocated) -> None:
     for spelling in ("link", "real"):
         target = str(relocated[spelling] / "outputs" / "a.md")
         assert policy._within_writable_root(target), spelling
+
+
+@pytest.mark.parametrize("mode", MODES)
+@pytest.mark.parametrize("template", [
+    "rm -rf {run}",
+    "rm -rf {run}/*",
+    "rm -rf {run}/in*",
+    "find {run} -delete",
+    "chmod -R 777 {run}",
+    "chown -R nobody {run}",
+])
+def test_recursive_ancestor_cannot_delete_read_only_inputs(tmp_path, mode, template):
+    run = tmp_path / "run"
+    for name in ("workspace", "outputs", "inputs"):
+        (run / name).mkdir(parents=True)
+    token = install_filesystem_state(state_for_sandbox_mode(
+        "native", workspace=str(run / "workspace"), outputs=str(run / "outputs"),
+        inputs=str(run / "inputs"), tmpdir=str(tmp_path),
+    ))
+    try:
+        assert _level(template.format(run=run), mode) == "deny"
+        assert _level(f"rm -rf {run}/outputs/stale", mode) != "deny"
+    finally:
+        reset_filesystem_state(token)
+
+
+@pytest.mark.parametrize("mode", MODES)
+def test_system_aliases_are_protected_but_scratch_is_writable(tmp_path, mode):
+    token = install_filesystem_state(state_for_sandbox_mode(
+        "native", workspace=str(tmp_path / "ws"), outputs=str(tmp_path / "out"),
+    ))
+    try:
+        resolved_etc = os.path.realpath("/etc")
+        assert _level(f"echo x > {resolved_etc}/hosts", mode) == "deny"
+        assert _level(f"rm -rf {resolved_etc}", mode) == "deny"
+        assert _level(f"echo x > {tmp_path}/scratch.txt", mode) != "deny"
+    finally:
+        reset_filesystem_state(token)

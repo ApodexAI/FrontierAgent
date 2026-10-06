@@ -83,6 +83,7 @@ def test_write_file_does_not_route_a_refused_path_through_the_sandbox(container)
         out = asyncio.run(write_file.func(path=str(target), content="payload"))
     assert "File written" not in out or str(target) not in out
     assert not target.exists()
+    assert not target.parent.exists(), "a refused write created its parent directory"
 
 
 def test_file_editor_create_does_not_route_a_refused_path_through_the_sandbox(
@@ -97,6 +98,7 @@ def test_file_editor_create_does_not_route_a_refused_path_through_the_sandbox(
         )
     assert "File created" not in out
     assert not target.exists()
+    assert not target.parent.exists(), "a refused write created its parent directory"
 
 
 def test_an_authorized_write_still_succeeds_in_process(container) -> None:
@@ -256,3 +258,58 @@ def test_an_unset_root_is_unchanged(monkeypatch) -> None:
     monkeypatch.delenv("CODING_WORKSPACE_ROOT", raising=False)
     with _scoped():
         assert _configured_workspace_root() is None
+
+
+@pytest.mark.parametrize("view_range", [
+    "1,1p' /dev/null; printf INJECTED; # -2", "0-1", "5-2", "1-two", "1-2-3",
+])
+def test_file_editor_rejects_invalid_ranges_before_running_commands(recorded, view_range):
+    editor = importlib.import_module("plugins.tools.file_editor")
+    result = asyncio.run(editor.file_editor_view.func(path="/remote/file", view_range=view_range))
+    assert result.startswith("Error: view_range")
+    assert recorded == []
+
+
+def test_file_editor_numeric_range_is_preserved(recorded):
+    editor = importlib.import_module("plugins.tools.file_editor")
+    asyncio.run(editor.file_editor_view.func(path="/remote/file", view_range=" 2 - 5 "))
+    assert recorded[-1] == "sed -n '2,5p' -- '/remote/file' | cat -n"
+
+
+def test_system_directory_alias_is_also_refused(tmp_path, monkeypatch):
+    auth = importlib.import_module("plugins.tools._path_auth")
+    system = tmp_path / "system"
+    system.mkdir()
+    alias = tmp_path / "alias"
+    alias.symlink_to(system, target_is_directory=True)
+    monkeypatch.setattr(auth, "_NEVER_A_WORKSPACE_ROOT", frozenset({str(alias)}))
+    monkeypatch.setattr(auth, "_NEVER_A_WORKSPACE_PARENT", frozenset({str(alias)}))
+    child = system / "child"
+    child.mkdir()
+    for root in (system, alias, child):
+        with _scoped(workspace_root=str(root)):
+            assert _configured_workspace_root() is None
+
+
+@pytest.mark.parametrize("tool_name", ["write_file", "file_editor_create"])
+def test_refused_write_after_sandbox_class_replacement(container, monkeypatch, tool_name):
+    # Reloading the runtime recreates its classes. Tools must consult the current
+    # class rather than retain an import-time snapshot that bypasses the guard.
+    original = _sandbox.CurrentSandbox
+    replacement = type(original.__name__, original.__bases__, {
+        key: value for key, value in vars(original).items()
+        if key not in {"__dict__", "__weakref__"}
+    })
+    monkeypatch.setattr(_sandbox, "CurrentSandbox", replacement)
+    sandbox = replacement(container)
+    assert not isinstance(sandbox, original)
+    token = _sandbox.set_task_sandbox(sandbox)
+    target = container.parent / "denied-after-reload" / "x.txt"
+    module_name = "write_file" if tool_name == "write_file" else "file_editor"
+    writer = getattr(importlib.import_module(f"plugins.tools.{module_name}"), tool_name)
+    try:
+        with _scoped(workspace_root=str(container)):
+            asyncio.run(writer.func(path=str(target), content="payload"))
+    finally:
+        _sandbox.clear_task_sandbox(token)
+    assert not target.parent.exists()

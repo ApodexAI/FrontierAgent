@@ -873,11 +873,6 @@ def bwrap_available() -> bool:
 # ``_venv_bind_args``. ``/proc`` is deliberately NOT here — see ``--proc`` below.
 _BWRAP_SYSTEM_PATHS = ("/usr", "/bin", "/lib", "/lib64", "/etc")
 
-# Recovery store below the workspace. Kept in sync with ``_overflow``'s
-# ``_WORKSPACE_SUBDIR`` by name rather than by import: ``_overflow`` imports this
-# module (lazily, from inside its functions), so a module-level import back the
-# other way would be a cycle.
-_SPILL_SUBDIR = ".spill"
 
 
 def _interpreter_bind_args() -> list[str]:
@@ -1018,6 +1013,27 @@ def _bwrap_mem_limit_mb() -> int:
     return _mem_limit_mb("sandbox_bwrap_mem_mb", "SANDBOX_BWRAP_MEM_MB", 12 * 1024)
 
 
+def _spill_mount_args() -> list[str]:
+    """Mount the CURRENT scope's spill stores read-only under ``/spill``.
+
+    Resolved per command, not when the jail is built: one jail (the shared
+    singleton, a pool lease, the container's inner jail) serves many agents, and
+    each must see only its own store and its sub-agents' — the same set
+    ``_path_auth`` authorizes, from the same scope key the writer used.
+
+    Read-only because model commands run as uid 0 inside the user namespace, so
+    file modes are not consulted; a mount is. The harness writes spill through
+    the host filesystem, so this constrains model commands only.
+    """
+    try:
+        from plugins.tools._overflow import spill_bind_args
+
+        return spill_bind_args()
+    except Exception as exc:
+        logger.warning("spill mount unavailable for this command: %s", exc)
+        return []
+
+
 class _BwrapCommands:
     """Command executor that wraps each command in a bubblewrap sandbox."""
 
@@ -1053,6 +1069,7 @@ class _BwrapCommands:
             _BWRAP_PATH,
             *base_args,
             *self._bind_args,
+            *_spill_mount_args(),
             "--chdir",
             self._chdir,
             "--",
@@ -1182,32 +1199,6 @@ class BwrapSandbox:
                 (["--ro-bind"] if read_only else ["--bind"])
                 + [str(src_path), str(dst)]
             )
-
-        # Mount the spill store read-only at its own top-level path.
-        #
-        # Without a mount the read-only store is only a lexical promise:
-        # ``_deliverable_policy`` refuses every natural way to write there —
-        # including bash, which IS token-scanned — but shell expansion can hide a
-        # path from any scanner (a glob, a brace, a ``$VAR`` assembled in pieces,
-        # a ``$(…)`` substitution), and the files are ordinary 0644 files. File
-        # modes cannot close it either — model commands run as uid 0 inside the
-        # user namespace, so DAC is not consulted. A mount is, which is why this
-        # is the layer that actually holds.
-        #
-        # This no longer has to be the LAST bind to win: the source now sits
-        # outside the workspace, so nothing above it overlaps and the ordering
-        # constraint that used to be load-bearing is gone.
-        #
-        # ``--ro-bind-try``, not ``--ro-bind``: the store is created lazily on the
-        # first spill, and bwrap aborts the whole jail when a ``--ro-bind`` source
-        # is missing. Args are rebuilt per command, so the mount appears as soon
-        # as the directory does — and until then there is nothing to protect.
-        #
-        # The harness writes spill through the host filesystem, not through the
-        # jail, so this constrains model commands only.
-        bind_args.extend([
-            "--ro-bind-try", str(spill_root()), _DEFAULT_SPILL_DIR,
-        ])
 
         self._workdir = str(workspace_path)
         self._tmpdir = str(tmp_path)
@@ -2374,18 +2365,53 @@ def spill_root() -> Path:
     """
     explicit = os.environ.get(_SPILL_DIR_ENV, "").strip()
     if explicit:
-        return Path(explicit)
+        return _refuse_symlinked_spill_root(Path(explicit))
     run_dir = os.environ.get("APODEX_RUN_DIR", "").strip()
     if run_dir:
-        return Path(run_dir) / "spill"
+        return _refuse_symlinked_spill_root(Path(run_dir) / "spill")
     # The uid is in the NAME so two accounts on one host do not share a store.
     # It is not a permission boundary and cannot be: under ``container`` the
     # model runs as a DIFFERENT uid than the harness and has to read these
     # files, so the directory must stay traversable by others (0755). What keeps
-    # one conversation out of another's recovery files is ``_path_auth``, which
-    # authorizes only the current scope plus the stores this process created —
-    # a local user with their own shell is outside that model either way.
-    return Path(tempfile.gettempdir()) / f"apodex-spill-{os.getuid()}"
+    # one conversation out of another's recovery files is the scope key
+    # (``_overflow.current_store_scope``): bwrap mounts only that scope's store
+    # and its sub-agents', and ``_path_auth`` authorizes the same set.
+    #
+    # KNOWN LIMITATION — ``container`` without the inner bwrap jail: every
+    # agent's commands run as the same unprivileged tool uid with no mount
+    # namespace, so a model command can ``cat`` any scope under this root.
+    # File modes cannot separate agents that share a uid; closing it needs the
+    # inner jail (``FRONTIER_AGENT_CONTAINER_INNER_BWRAP``). In-process file
+    # tools are still scope-checked by ``_path_auth``.
+    return _refuse_symlinked_spill_root(
+        Path(tempfile.gettempdir()) / f"apodex-spill-{os.getuid()}",
+    )
+
+
+_private_spill_root: Path | None = None
+_private_spill_lock = threading.Lock()
+
+
+def _refuse_symlinked_spill_root(path: Path) -> Path:
+    """``path``, unless it is a symlink — then one private temp directory.
+
+    Every user of the root resolves it, so a symlink planted at a shared
+    location (``/tmp/apodex-spill-<uid>``) would redirect the store, the
+    ``/spill`` mount and read authorization to wherever it points. Falling back
+    to a private directory keeps spill working instead of failing the run; it is
+    created once so the writer, the mount and the reader still agree.
+    """
+    global _private_spill_root
+    if not path.is_symlink():
+        return path
+    with _private_spill_lock:
+        if _private_spill_root is None:
+            _private_spill_root = Path(tempfile.mkdtemp(prefix="apodex-spill-"))
+            logger.warning(
+                "spill root %s is a symlink; using private %s instead",
+                path, _private_spill_root,
+            )
+        return _private_spill_root
 
 
 def is_spill_path(path: str) -> bool:

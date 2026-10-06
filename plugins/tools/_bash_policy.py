@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import contextlib
 import contextvars
+import fnmatch
 import logging
 import os
 import re
@@ -315,18 +316,21 @@ def _relocated_protected_roots() -> tuple[str, ...]:
 def _under_static_protected_root(path: str) -> bool:
     """Whether ``path`` names one of the canonical system roots.
 
-    ``_SYSTEM_ROOTS`` is matched AS WRITTEN and deliberately never resolved: on
-    macOS ``/var`` resolves to ``/private/var``, which contains ``$TMPDIR`` and
-    would then swallow this run's own outputs. Every SPELLING of the target is
-    checked, though, so ``/private/etc`` is recognised as ``/etc``.
+    Local system roots include their resolved aliases (``/etc`` becomes
+    ``/private/etc`` on macOS). Callers exempt this run's writable mounts
+    first, so resolving ``/var`` does not block legitimate scratch files.
+    Remote system paths are never resolved against the host.
 
     Loses to :func:`_within_writable_root`: a run directory legitimately sits
     under one of these prefixes.
     """
+    roots: set[str] = set(_SYSTEM_ROOTS)
+    if _local_filesystem_paths():
+        roots.update(resolved for root in _SYSTEM_ROOTS if (resolved := _real_path(root)))
     return any(
         candidate in _PROTECTED_TARGETS or any(
             candidate == root or candidate.startswith(root + "/")
-            for root in _SYSTEM_ROOTS
+            for root in roots
         )
         for candidate in _path_spellings(path)
     )
@@ -357,6 +361,26 @@ def _under_protected_root(path: str) -> bool:
     return _under_run_read_only_root(path) or _under_static_protected_root(path)
 
 
+def _contains_run_read_only_root(path: str) -> bool:
+    """Whether a recursive target selects a read-only root or its ancestor.
+
+    Match ancestors too for glob operands such as ``/run/*``: deleting the
+    parent or selecting inputs through a wildcard must not bypass protection.
+    """
+    targets = _path_spellings(path)
+    for root in _relocated_protected_roots():
+        for spelling in _path_spellings(root):
+            ancestor = spelling
+            while ancestor:
+                if any(fnmatch.fnmatchcase(ancestor, target) for target in targets):
+                    return True
+                parent = os.path.dirname(ancestor)
+                if parent == ancestor:
+                    break
+                ancestor = parent
+    return False
+
+
 def _is_delete_protected(arg: str) -> bool:
     """True if recursively deleting/mutating ``arg`` must be refused: the fs
     root, the home tree (``~`` / ``$HOME``), or anything under a system/input
@@ -370,7 +394,7 @@ def _is_delete_protected(arg: str) -> bool:
     # The RAW argument, so ``_path_spellings`` can resolve it: ``_norm_target``
     # has already collapsed ``..``, which loses symlink-parent semantics.
     target = raw if raw.startswith("/") else a
-    if _under_run_read_only_root(target):
+    if _under_run_read_only_root(target) or _contains_run_read_only_root(target):
         return True
     # This run's own workspace/outputs stay clearable even when they sit under
     # a protected prefix — ``rm -rf $OUTPUTS/stale`` with outputs under

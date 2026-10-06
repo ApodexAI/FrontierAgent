@@ -1135,6 +1135,8 @@ def test_clear_discards_only_the_active_sessions_spill(tmp_path, monkeypatch):
     from apodex.session import TerminalSession
     from frontier_agent.core.messages import user_msg
 
+    # This tests store access/cleanup, independently of host bwrap support.
+    monkeypatch.setenv("SANDBOX_BACKEND", "native")
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("APODEX_RUNS_ROOT", str(tmp_path / "runs"))
     monkeypatch.delenv("APODEX_INPUT_STAGING_DIR", raising=False)
@@ -1239,6 +1241,8 @@ def test_context_reset_still_cleans_a_session_private_workspace(tmp_path, monkey
     private.mkdir(parents=True)
     link = tmp_path / "current-workspace"
     link.symlink_to(private, target_is_directory=True)
+    # This tests store access/cleanup, independently of host bwrap support.
+    monkeypatch.setenv("SANDBOX_BACKEND", "native")
     monkeypatch.setenv("APODEX_RUNS_ROOT", str(runs_root))
     monkeypatch.setenv("FRONTIER_AGENT_WORKSPACE_DIR", str(link))
     monkeypatch.setenv("APODEX_SPILL_DIR", str(tmp_path / "store"))

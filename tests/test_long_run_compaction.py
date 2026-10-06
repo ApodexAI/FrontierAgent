@@ -783,19 +783,20 @@ def test_a_spilled_body_is_readable_but_not_writable_by_the_file_tools(
     authorization is what replaces a per-writer special case."""
     from plugins.tools._path_auth import _is_path_allowed
 
+    # This tests store access/cleanup, independently of host bwrap support.
+    monkeypatch.setenv("SANDBOX_BACKEND", "native")
     monkeypatch.setenv("APODEX_SPILL_DIR", str(tmp_path / "store"))
+    from plugins.tools._sandbox import resolve_runtime_path
+
     token = set_current_execution_scope(ExecutionScope(task_id="t", metadata={}))
     try:
         visible = _overflow.spill_compacted_body("bash", "body " * 400)
+        assert visible
+        physical = resolve_runtime_path(visible)
+        readable, _ = _is_path_allowed(physical)
+        writable, reason = _is_path_allowed(physical, write_access=True)
     finally:
         reset_current_execution_scope(token)
-    assert visible
-
-    from plugins.tools._sandbox import resolve_runtime_path
-
-    physical = resolve_runtime_path(visible)
-    readable, _ = _is_path_allowed(physical)
-    writable, reason = _is_path_allowed(physical, write_access=True)
 
     assert readable, "recovery cannot work if the store is unreadable"
     assert not writable, reason
@@ -845,6 +846,8 @@ def test_native_names_the_physical_path_not_the_mount(tmp_path, monkeypatch) -> 
 def test_compaction_spills_are_isolated_by_session(tmp_path, monkeypatch) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
+    # This tests store access/cleanup, independently of host bwrap support.
+    monkeypatch.setenv("SANDBOX_BACKEND", "native")
     monkeypatch.setattr(
         "plugins.tools._sandbox.current_local_workspace",
         lambda: str(workspace),
@@ -906,6 +909,8 @@ def test_cleanup_overflow_defaults_to_the_callers_own_scope(tmp_path, monkeypatc
     nothing, so the no-argument form has to resolve the same scope they used."""
     workspace = tmp_path / "workspace"
     workspace.mkdir()
+    # This tests store access/cleanup, independently of host bwrap support.
+    monkeypatch.setenv("SANDBOX_BACKEND", "native")
     monkeypatch.setattr(
         "plugins.tools._sandbox.current_local_workspace", lambda: str(workspace),
     )
@@ -946,6 +951,8 @@ def test_process_cleanup_removes_only_stores_this_process_created(
     so none of those defences are needed.
     """
     store = tmp_path / "store"
+    # This tests store access/cleanup, independently of host bwrap support.
+    monkeypatch.setenv("SANDBOX_BACKEND", "native")
     monkeypatch.setenv("APODEX_SPILL_DIR", str(store))
 
     # Another session's store, in the same root, which we did not create.
@@ -1213,6 +1220,9 @@ def test_mount_fallback_names_spill_per_backend(
     # this case to the canonical mount and fail the assertion for a reason that
     # has nothing to do with the code under test.
     monkeypatch.delenv("FRONTIER_AGENT_CONTAINER_INNER_BWRAP", raising=False)
+
+    # This unit test models a usable jail; unusable bwrap is covered separately.
+    monkeypatch.setattr("plugins.tools._sandbox.bwrap_available", lambda: True)
 
     target, visible = _overflow._overflow_dir("task:session")
 

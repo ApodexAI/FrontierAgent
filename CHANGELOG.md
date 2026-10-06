@@ -11,8 +11,11 @@ Initial open-source release of FrontierAgent.
 
 ### Changed
 
+- Upgrade AgentCore to 0.14.1 for provider heartbeat handling and bounded
+  admission, summary requests, and cancellation cleanup.
+
 - **Runtime engine moved to [`apodex-agent-core`](https://pypi.org/project/apodex-agent-core/)
-  (pinned `==0.12.2`).** The agent loop, loop contracts, tool execution,
+  (pinned `==0.14.1`).** The agent loop, loop contracts, tool execution,
   compaction, observers, AgentBus, DAG and providers now come from `agent_core`;
   `frontier_agent.*` keeps its import paths as `sys.modules` aliases or thin
   adapters, so workflows, apodex and benchmarks are unchanged. Product policy is
@@ -61,6 +64,11 @@ Initial open-source release of FrontierAgent.
   running natively.
 
 ### Fixed
+
+- Keep bash protection on resolved local system aliases such as macOS
+  `/private/etc`, while exempting the run's own writable mounts. Recursive
+  deletion and mutation refuse ancestors and wildcard selections of read-only
+  inputs before applying that exemption.
 
 - **Bash policy: this run's own writable mounts are no longer system paths.**
   A redirect into a relocated outputs or workspace directory was refused by the
@@ -129,6 +137,19 @@ Initial open-source release of FrontierAgent.
   `reboot` are no longer refused, while `bash -c`, shell heredocs, pipes into a
   shell, evaluators (`watch`/`tmux`/…) and `systemctl` shutdown units still are.
   `DROP TABLE` keeps screening the whole text.
+- Spill recovery: oversized and compacted tool results are stored through
+  AgentCore's `SpillStore` (one store, one registry). A single scope key
+  (`task:llm_session`) now decides the store directory, the bwrap `/spill` mount
+  and read authorization: a jail sees only its own store and its sub-agents',
+  siblings and other conversations see nothing, and `_path_auth` no longer
+  authorizes every store the process created. A path is advertised only when
+  the backend actually running commands can open it (`auto` going to E2B, or
+  bwrap unusable, gets none), and the compaction spill callback is withheld
+  then. Compacting a truncated preview points at the original full body
+  instead of storing the preview as "[Full text]". The `recover_result` footer
+  is only shown when a trajectory JSONL exists. Known limitation: `container`
+  mode without the inner bwrap jail shares one tool uid, so model commands can
+  still read other scopes there.
 - Surface finalize-gate bypasses on the final turn: an answer delivered despite
   open task-board items now carries an unfinished-work note and a
   `finalize_gate_bypassed` marker instead of reading as a clean success.

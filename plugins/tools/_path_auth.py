@@ -77,10 +77,11 @@ _NEVER_A_WORKSPACE_PARENT = frozenset({"/usr", "/etc", "/bin", "/sbin", "/boot",
 def _is_system_root(candidate: Path) -> bool:
     """Whether ``candidate`` is a system root, or a direct child of a system
     directory whose children are equally unsuitable."""
-    return (
-        str(candidate) in _NEVER_A_WORKSPACE_ROOT
-        or str(candidate.parent) in _NEVER_A_WORKSPACE_PARENT
-    )
+    # Compare canonical paths too: macOS maps /etc and /var into /private,
+    # and other hosts may expose system directories through aliases.
+    roots = {Path(root).resolve() for root in _NEVER_A_WORKSPACE_ROOT}
+    parents = {Path(root).resolve() for root in _NEVER_A_WORKSPACE_PARENT}
+    return candidate in roots or candidate.parent in parents
 
 
 def _configured_workspace_root() -> Path | None:
@@ -322,39 +323,21 @@ def _resolve_spill_dirs() -> list[Path]:
 
     Authorized for READ so ``read_file`` / ``grep_search`` can recover a body
     compaction dropped, and never for write — the same shape as ``/inputs``. The
-    canonical ``/spill`` path a model sees is rewritten to this by
-    ``resolve_runtime_path`` before it reaches here. Gating on existence means a
-    run that never spilled adds no prefix. Imported lazily to avoid an import
-    cycle with ``_sandbox``.
+    canonical ``/spill`` path a model sees is rewritten to the physical root by
+    ``resolve_runtime_path`` before it reaches here. Imported lazily to avoid an
+    import cycle with ``_sandbox``.
+
+    The set is exactly what ``spill_bind_args`` mounts into a bwrap jail: the
+    current scope's store plus its own sub-agents' stores, each only if this
+    process created it. A sibling sub-agent's store, another conversation in
+    this process, or another process's store matches none of them.
     """
     try:
-        from plugins.tools._overflow import _created_stores, _current_task_id
-        from plugins.tools._overflow import _scope_component as scope_of
-        from plugins.tools._sandbox import spill_root
+        from plugins.tools._overflow import readable_store_dirs
 
-        root = spill_root()
+        return readable_store_dirs()
     except Exception:
         return []
-    if not root.is_dir():
-        return []
-
-    # Narrower than the root on purpose. The root is shared — a temp directory,
-    # or a run directory — so authorizing it would let one conversation read
-    # another's spilled tool results, which the old in-workspace layout made
-    # impossible. Two things are authorized instead:
-    #
-    #   * this conversation's own scope, which is what its recovery index names;
-    #   * every store THIS process created, because in-process sub-agents spill
-    #     under their own scope and a fan-in report can carry one of those paths
-    #     back to the parent.
-    #
-    # A different session in a different process matches neither.
-    allowed: list[Path] = []
-    scope = scope_of(_current_task_id())
-    if scope and (root / scope).is_dir():
-        allowed.append(root / scope)
-    allowed.extend(store for store in _created_stores if store.is_dir())
-    return allowed
 
 
 def _allowed_local_prefixes(

@@ -1065,16 +1065,6 @@ async def main_agent_node(
                 src = dataset_root / src
             input_sources.append(src)
         inputs_available = any(_has_input_files(str(src)) for src in input_sources)
-    main_fs_note = render_sandbox_fs_note(
-        sandbox_mode=sandbox_mode,
-        inputs_available=inputs_available,
-        audience="main",
-    )
-    sub_fs_note = render_sandbox_fs_note(
-        sandbox_mode=sandbox_mode,
-        inputs_available=inputs_available,
-        audience="sub",
-    )
     stream_repetition_config = parse_stream_repetition_config(agent_cfg)
     sub_agent_llm = llm
     llm, stream_repetition_observer = wrap_llm_for_stream_repetition(
@@ -1094,7 +1084,7 @@ async def main_agent_node(
     main_keep_recent_msgs = max(6, int(agent_cfg.get("keep_recent_turns", 5)) * 3)
     main_compaction_policy: Any = None
     main_gauge: InputTokenGauge | None = None
-    from plugins.tools._overflow import spill_compacted_body
+    from plugins.tools._overflow import default_compaction_spill
 
     if context_compaction == "tiered" and max_len > 0:
         main_gauge = InputTokenGauge()
@@ -1107,7 +1097,7 @@ async def main_agent_node(
             relief_target=int(max_len * 0.6),
             protect_tool_names=PROTECTED_FANIN_TOOLS,
             gauge=main_gauge,  # calibrate relief to real tokens (unit-match trigger)
-            spill=spill_compacted_body if compaction_spill else None,
+            spill=default_compaction_spill() if compaction_spill else None,
             # Bound the whole retry sequence by what ONE summariser call was
             # already allowed to spend, so retrying costs no extra worst case.
             summary_retry_timeout_s=llm_timeout,
@@ -1310,6 +1300,19 @@ async def main_agent_node(
         outputs=str(outputs_dir),
         inputs=str(inputs_dir),
     ))
+
+    # Render after installation: environment overrides may name host directories
+    # that bwrap exposes under entirely different, canonical mount paths.
+    main_fs_note = render_sandbox_fs_note(
+        sandbox_mode=sandbox_mode,
+        inputs_available=inputs_available,
+        audience="main",
+    )
+    sub_fs_note = render_sandbox_fs_note(
+        sandbox_mode=sandbox_mode,
+        inputs_available=inputs_available,
+        audience="sub",
+    )
 
     swarm_runtime = SwarmSubagentRuntime(
         original_question=question,
