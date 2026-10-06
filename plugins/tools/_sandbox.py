@@ -3000,6 +3000,22 @@ def shell_quote(s: str) -> str:
     return "'" + s.replace("'", "'\\''") + "'"
 
 
+def _local_write_refusal(path: str) -> str:
+    """Why the path gate refuses writing ``path`` on this host, or "".
+
+    Only consulted for the in-process write branch below. Imported lazily:
+    ``_path_auth`` imports this module.
+    """
+    try:
+        from plugins.tools._path_auth import _is_path_allowed
+    except Exception as exc:  # pragma: no cover - broken install
+        return f"path authorization unavailable: {exc}"
+    allowed, reason = _is_path_allowed(path, write_access=True)
+    if allowed:
+        return ""
+    return reason or f"write to {path!r} is not authorized"
+
+
 def sandbox_write_file(
     sandbox: Any, path: str, content: str, *, mode: str = "w",
 ) -> tuple[bool, str]:
@@ -3021,9 +3037,19 @@ def sandbox_write_file(
     # (128 KB), so routing deliverables through it fails with E2BIG somewhere
     # around 96 KB of content — and container mode has no /tmp fallback, so the
     # write becomes a hard error. The harness process already has the mount
-    # bound read-write and the path has passed ``_path_auth``; writing it
-    # directly is both unlimited and cheaper (no bwrap + python3 spawn).
+    # bound read-write, so writing it directly is both unlimited and cheaper
+    # (no bwrap + python3 spawn).
+    #
+    # This branch is an ordinary ``open()`` in the harness process — as root, in
+    # container mode — so it is NOT a sandbox boundary, and the path has to be
+    # authorized HERE. Its callers (``write_file``, ``file_editor_create``)
+    # reach the sandbox precisely when ``_path_auth`` refused a local write, and
+    # for a CurrentSandbox that made the refusal a detour rather than a denial:
+    # a path the gate rejected was written to the host anyway.
     if isinstance(sandbox, CurrentSandbox):
+        reason = _local_write_refusal(path)
+        if reason:
+            return False, reason
         try:
             p = Path(path)
             new_parent = not p.parent.exists()
@@ -3051,7 +3077,7 @@ def sandbox_write_file(
     if mode == "w" and isinstance(sandbox, DockerSandbox):
         parent = os.path.dirname(path)
         if parent:
-            sandbox.commands.run(f"mkdir -p {parent}", timeout=10)
+            sandbox.commands.run(f"mkdir -p {shell_quote(parent)}", timeout=10)
         with tempfile.NamedTemporaryFile(
             mode="w", encoding="utf-8", delete=False, suffix=".tmp",
         ) as f:

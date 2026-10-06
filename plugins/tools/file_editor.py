@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import logging
+import re
 
 from frontier_agent.core.tool import tool
+from plugins.tools import _sandbox
 from plugins.tools._deliverable_policy import output_write_error
 from plugins.tools._path_auth import _authorized_local_path
 from plugins.tools._sandbox import (
     aget_sandbox,
     arun_sandbox_cmd,
     asandbox_write_file,
+    shell_quote,
 )
 
 logger = logging.getLogger(__name__)
@@ -39,6 +42,16 @@ async def file_editor_view(path: str, view_range: str = "") -> str:
     if not path or not path.strip():
         return "Error: path is required."
 
+    line_range: tuple[int, int] | None = None
+    if view_range:
+        match = re.fullmatch(r"\s*([0-9]+)\s*-\s*([0-9]+)\s*", view_range)
+        if match is None:
+            return "Error: view_range must be a positive line range like 1-50."
+        start, end = int(match[1]), int(match[2])
+        if start < 1 or end < start:
+            return "Error: view_range must be a positive line range like 1-50."
+        line_range = start, end
+
     local_path, _reason = _authorized_local_path(path)
     if local_path is not None:
         from plugins.tools.ignore_rules import discover_repo_root, should_ignore_path
@@ -64,12 +77,7 @@ async def file_editor_view(path: str, view_range: str = "") -> str:
             lines = local_path.read_text(encoding="utf-8").splitlines()
         except Exception as e:
             return f"Error viewing {path}: {e}"
-        if view_range and "-" in view_range:
-            start_s, end_s = view_range.split("-", 1)
-            start = max(int(start_s.strip() or "1"), 1)
-            end = max(int(end_s.strip() or str(start)), start)
-        else:
-            start, end = 1, len(lines)
+        start, end = line_range if line_range is not None else (1, len(lines))
         rendered = "\n".join(f"{idx}: {line}" for idx, line in enumerate(lines[start - 1:end], start=start))
         return _truncate(rendered or "(empty file)")
 
@@ -78,17 +86,21 @@ async def file_editor_view(path: str, view_range: str = "") -> str:
     except RuntimeError as e:
         return f"Error: {e}"
 
+    # Every path below is interpolated into a shell command, so it is quoted
+    # once here: an unquoted path containing ``;`` or ``$(…)`` would run
+    # arbitrary commands in the sandbox without passing the bash policy.
+    q = shell_quote(path)
     try:
         check = await arun_sandbox_cmd(
             sandbox,
-            f"test -d {path} && echo DIR || echo FILE", timeout=10,
+            f"test -d {q} && echo DIR || echo FILE", timeout=10,
         )
         is_dir = "DIR" in check.stdout
 
         if is_dir:
             result = await arun_sandbox_cmd(
                 sandbox,
-                f"find {path} -maxdepth 2 -not -path '*/.git/*' "
+                f"find {q} -maxdepth 2 -not -path '*/.git/*' "
                 f"-not -path '*/node_modules/*' -not -path '*/__pycache__/*' "
                 f"| head -100 | sort",
                 timeout=15,
@@ -96,15 +108,11 @@ async def file_editor_view(path: str, view_range: str = "") -> str:
             return _truncate(result.stdout or f"(empty directory: {path})")
 
         # File view
-        if view_range:
-            parts = view_range.split("-")
-            if len(parts) == 2:
-                start, end = parts[0].strip(), parts[1].strip()
-                cmd = f"sed -n '{start},{end}p' {path} | cat -n"
-            else:
-                cmd = f"cat -n {path}"
+        if line_range is not None:
+            start, end = line_range
+            cmd = f"sed -n {shell_quote(f'{start},{end}p')} -- {q} | cat -n"
         else:
-            cmd = f"cat -n {path}"
+            cmd = f"cat -n -- {q}"
 
         result = await arun_sandbox_cmd(sandbox, cmd, timeout=15)
 
@@ -154,9 +162,9 @@ async def file_editor_create(path: str, content: str) -> str:
     try:
         import os
         parent = os.path.dirname(path)
-        if parent:
+        if parent and not isinstance(sandbox, _sandbox.CurrentSandbox):
             await arun_sandbox_cmd(
-                sandbox, f"mkdir -p {parent}", timeout=10,
+                sandbox, f"mkdir -p {shell_quote(parent)}", timeout=10,
             )
 
         # Write via python in sandbox (avoids files.write permission issues)
@@ -165,7 +173,7 @@ async def file_editor_create(path: str, content: str) -> str:
             return f"Error creating {path}: {err}"
 
         result = await arun_sandbox_cmd(
-            sandbox, f"wc -l < {path}", timeout=5,
+            sandbox, f"wc -l < {shell_quote(path)}", timeout=5,
         )
         lines = result.stdout.strip() if result.stdout else "?"
 
@@ -232,7 +240,9 @@ async def file_editor_str_replace(path: str, old_str: str, new_str: str) -> str:
 
     try:
         # Read current content via cat (more reliable than files.read for all paths)
-        result = await arun_sandbox_cmd(sandbox, f"cat {path}", timeout=10)
+        result = await arun_sandbox_cmd(
+            sandbox, f"cat -- {shell_quote(path)}", timeout=10,
+        )
         if result.exit_code != 0:
             return f"Error: Cannot read {path}: {result.stderr or 'file not found'}"
         content = result.stdout

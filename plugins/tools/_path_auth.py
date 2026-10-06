@@ -41,8 +41,49 @@ _BLOCKED_SUFFIXES = (".key", ".pem", ".cert")
 _WORD_SPLIT = re.compile(r"[^a-z0-9]+")
 
 
+#: Roots that can never BECOME a workspace: naming one as the workspace root
+#: would authorize the whole system tree for reads, and — outside the service
+#: checkout, which is the only thing ``_is_isolated_workspace_root`` refuses —
+#: for writes too. The workspace root arrives through ExecutionScope metadata,
+#: which carries workload input: a benchmark runner's trial directory is a
+#: legitimate value, ``/etc`` is not, and this module cannot tell which caller
+#: filled the key in. So the VALUE is constrained rather than the caller.
+#:
+#: A path may still live under one of these (a container's ``/var/lib/...``
+#: volume, ``/opt/app/run-17``): only naming the root itself, or a direct
+#: system subdirectory of it, is refused. ``/tmp`` is absent — a scratch
+#: workspace under it is ordinary — and so is ``/home``, whose per-user
+#: subdirectories are where a local CLI run actually lives.
+_NEVER_A_WORKSPACE_ROOT = frozenset({
+    "/", "/etc", "/usr", "/bin", "/sbin", "/lib", "/lib64", "/boot", "/dev",
+    "/proc", "/sys", "/var", "/root", "/opt", "/home",
+})
+
+
+#: Roots whose direct children are no more suitable than the root itself:
+#: ``/usr/local`` and ``/etc/cron.d`` grant exactly the writes that make naming
+#: them an escalation. ``/var`` and ``/opt`` are deliberately absent — a
+#: container volume at ``/var/lib/app/run`` and macOS ``$TMPDIR`` under
+#: ``/var/folders/...`` are real run directories, and refusing them is the
+#: over-denial that loses a run's deliverables.
+_NEVER_A_WORKSPACE_PARENT = frozenset({"/usr", "/etc", "/bin", "/sbin", "/boot", "/proc", "/sys"})
+
+
+def _is_system_root(candidate: Path) -> bool:
+    """Whether ``candidate`` is a system root, or a direct child of a system
+    directory whose children are equally unsuitable."""
+    # Compare canonical paths too: macOS maps /etc and /var into /private,
+    # and other hosts may expose system directories through aliases.
+    roots = {Path(root).resolve() for root in _NEVER_A_WORKSPACE_ROOT}
+    parents = {Path(root).resolve() for root in _NEVER_A_WORKSPACE_PARENT}
+    return candidate in roots or candidate.parent in parents
+
+
 def _configured_workspace_root() -> Path | None:
-    """Return the explicit workspace root, if one was configured for this task."""
+    """Return the explicit workspace root, if one was configured for this task.
+
+    The value is checked, not its source: see ``_NEVER_A_WORKSPACE_ROOT``.
+    """
     scope = get_current_execution_scope()
     metadata = scope.metadata if scope else {}
     raw_root = (
@@ -55,6 +96,12 @@ def _configured_workspace_root() -> Path | None:
     workspace_root = Path(raw_root).expanduser().resolve()
     if not workspace_root.is_dir():
         logger.warning("Ignoring invalid CODING_WORKSPACE_ROOT '%s'", raw_root)
+        return None
+    if _is_system_root(workspace_root):
+        logger.warning(
+            "Refusing workspace root '%s': a system directory cannot be a "
+            "workspace, so it grants no filesystem access", raw_root,
+        )
         return None
     return workspace_root
 

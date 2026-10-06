@@ -10,6 +10,7 @@ import logging
 import os
 
 from frontier_agent.core.tool import tool
+from plugins.tools import _sandbox
 from plugins.tools._deliverable_policy import output_write_error
 from plugins.tools._path_auth import _authorized_local_path
 from plugins.tools._sandbox import (
@@ -19,6 +20,7 @@ from plugins.tools._sandbox import (
     resolve_runtime_path,
     resolve_sandbox_mode,
     sandbox_available,
+    shell_quote,
 )
 
 logger = logging.getLogger(__name__)
@@ -73,9 +75,9 @@ async def write_file(path: str, content: str, append: bool = False) -> str:
         try:
             sandbox = await aget_sandbox()
             parent = os.path.dirname(path)
-            if parent:
+            if parent and not isinstance(sandbox, _sandbox.CurrentSandbox):
                 await arun_sandbox_cmd(
-                    sandbox, f"mkdir -p {parent}", timeout=10,
+                    sandbox, f"mkdir -p {shell_quote(parent)}", timeout=10,
                 )
 
             mode = "a" if append else "w"
