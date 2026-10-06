@@ -289,3 +289,27 @@ def test_system_directory_alias_is_also_refused(tmp_path, monkeypatch):
     for root in (system, alias, child):
         with _scoped(workspace_root=str(root)):
             assert _configured_workspace_root() is None
+
+
+@pytest.mark.parametrize("tool_name", ["write_file", "file_editor_create"])
+def test_refused_write_after_sandbox_class_replacement(container, monkeypatch, tool_name):
+    # Reloading the runtime recreates its classes. Tools must consult the current
+    # class rather than retain an import-time snapshot that bypasses the guard.
+    original = _sandbox.CurrentSandbox
+    replacement = type(original.__name__, original.__bases__, {
+        key: value for key, value in vars(original).items()
+        if key not in {"__dict__", "__weakref__"}
+    })
+    monkeypatch.setattr(_sandbox, "CurrentSandbox", replacement)
+    sandbox = replacement(container)
+    assert not isinstance(sandbox, original)
+    token = _sandbox.set_task_sandbox(sandbox)
+    target = container.parent / "denied-after-reload" / "x.txt"
+    module_name = "write_file" if tool_name == "write_file" else "file_editor"
+    writer = getattr(importlib.import_module(f"plugins.tools.{module_name}"), tool_name)
+    try:
+        with _scoped(workspace_root=str(container)):
+            asyncio.run(writer.func(path=str(target), content="payload"))
+    finally:
+        _sandbox.clear_task_sandbox(token)
+    assert not target.parent.exists()

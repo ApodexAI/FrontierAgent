@@ -6,10 +6,10 @@ import logging
 import re
 
 from frontier_agent.core.tool import tool
+from plugins.tools import _sandbox
 from plugins.tools._deliverable_policy import output_write_error
 from plugins.tools._path_auth import _authorized_local_path
 from plugins.tools._sandbox import (
-    CurrentSandbox,
     aget_sandbox,
     arun_sandbox_cmd,
     asandbox_write_file,
@@ -162,7 +162,7 @@ async def file_editor_create(path: str, content: str) -> str:
     try:
         import os
         parent = os.path.dirname(path)
-        if parent and not isinstance(sandbox, CurrentSandbox):
+        if parent and not isinstance(sandbox, _sandbox.CurrentSandbox):
             await arun_sandbox_cmd(
                 sandbox, f"mkdir -p {shell_quote(parent)}", timeout=10,
             )
