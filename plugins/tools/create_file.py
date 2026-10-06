@@ -20,7 +20,6 @@ from plugins.tools._sandbox import (
     _DEFAULT_WORKSPACE_DIR,
     aget_sandbox,
     arun_sandbox_cmd,
-    resolve_mount_dirs,
     resolve_runtime_path,
     resolve_sandbox_mode,
 )
@@ -100,16 +99,18 @@ def _inlined_ops_program(program_path: str) -> str | None:
 def _write_roots() -> tuple[str, ...]:
     """The roots ``create_file`` may write under, resolved per call.
 
-    The container mount points (``/workspace`` / ``/outputs`` — the convention
-    this tool's docstring teaches the model) plus whatever
-    :func:`resolve_mount_dirs` currently maps them to. Native mode overrides
-    them to real host directories and then hands the model those exact paths
-    (``apodex.session._deliverable_context``), so accepting only the literals
-    refused every native-mode write.
+    The canonical mount points (``/workspace`` / ``/outputs`` — the convention
+    this tool's docstring teaches the model) plus whatever this run's trusted
+    filesystem state currently maps them to. Native mode overrides them to real
+    host directories and then hands the model those exact paths, so accepting
+    only the literals refused every native-mode write. ``inputs`` is absent
+    by construction: it is read-only.
     """
-    workspace, outputs, _inputs = resolve_mount_dirs()
+    from plugins.tools._filesystem_state import current_filesystem_state
+
+    state = current_filesystem_state()
     return tuple(dict.fromkeys(
-        (_DEFAULT_WORKSPACE_DIR, _DEFAULT_OUTPUTS_DIR, workspace, outputs),
+        (_DEFAULT_WORKSPACE_DIR, _DEFAULT_OUTPUTS_DIR, *state.write_roots()),
     ))
 
 
