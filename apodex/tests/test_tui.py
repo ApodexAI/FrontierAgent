@@ -3159,7 +3159,8 @@ async def test_user_scroll_can_leave_and_restore_stream_following() -> None:
         await pilot.pause()
         assert transcript.scroll_offset.y == 5
 
-        transcript.scroll_end(animate=False)
+        # Assert the completed scroll, without depending on a deferred refresh.
+        transcript.scroll_end(animate=False, immediate=True)
         await pilot.pause()
         assert transcript._wants_tail is True
         app.sink.content_delta("tail output\n\n" * 20)

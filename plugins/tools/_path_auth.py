@@ -72,10 +72,11 @@ _NEVER_A_WORKSPACE_PARENT = frozenset({"/usr", "/etc", "/bin", "/sbin", "/boot",
 def _is_system_root(candidate: Path) -> bool:
     """Whether ``candidate`` is a system root, or a direct child of a system
     directory whose children are equally unsuitable."""
-    return (
-        str(candidate) in _NEVER_A_WORKSPACE_ROOT
-        or str(candidate.parent) in _NEVER_A_WORKSPACE_PARENT
-    )
+    # Compare canonical paths too: macOS maps /etc and /var into /private,
+    # and other hosts may expose system directories through aliases.
+    roots = {Path(root).resolve() for root in _NEVER_A_WORKSPACE_ROOT}
+    parents = {Path(root).resolve() for root in _NEVER_A_WORKSPACE_PARENT}
+    return candidate in roots or candidate.parent in parents
 
 
 def _configured_workspace_root() -> Path | None:
