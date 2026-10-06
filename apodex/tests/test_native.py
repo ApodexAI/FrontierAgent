@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-import time
 from pathlib import Path
 
 import pytest
@@ -202,18 +201,34 @@ def test_bwrap_sandbox_rebuilds_when_workspace_changes(
     assert second.binds == ((str(second_workspace.resolve()),) * 2 + (False,),)
 
 
-def test_run_shell_kills_the_whole_command_on_timeout(tmp_path) -> None:
-    """A timed-out command must not keep writing to the workspace.
+@pytest.mark.parametrize(
+    "command",
+    ["(sleep 2; touch marker) & wait", "(sleep 2; touch marker) & exit 0"],
+    ids=["running-shell", "exited-shell"],
+)
+@pytest.mark.parametrize("interruption", ["timeout", "cancellation"])
+async def test_run_shell_kills_the_whole_command_on_interruption(
+    tmp_path, command, interruption,
+) -> None:
+    """An interrupted command must not keep writing to the workspace.
 
     The subshell is a grandchild holding the output pipes, so killing only the
-    shell would still leave it alive to write the marker.
+    shell would still leave it alive to write the marker. Cleanup must also run
+    when the shell has already exited while its child still holds the pipes.
     """
-    with pytest.raises(TimeoutError):
-        asyncio.run(sandbox.run_shell(
-            "(sleep 2; touch marker) & wait", str(tmp_path), 1,
+    if interruption == "timeout":
+        with pytest.raises(TimeoutError):
+            await sandbox.run_shell(command, str(tmp_path), 1, Strategy(NATIVE, "test"))
+    else:
+        task = asyncio.create_task(sandbox.run_shell(
+            command, str(tmp_path), 10,
             Strategy(NATIVE, "test"),
         ))
-    time.sleep(2)
+        await asyncio.sleep(1)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    await asyncio.sleep(2)
 
     assert not (tmp_path / "marker").exists()
 

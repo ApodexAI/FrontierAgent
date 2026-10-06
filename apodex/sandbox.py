@@ -262,13 +262,15 @@ async def run_shell(
         stderr=asyncio.subprocess.PIPE,
         start_new_session=True,
     )
+    completed = False
     try:
         out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        completed = True
     finally:
-        if proc.returncode is None:
+        if not completed:
             # Timed out or cancelled: kill the whole session, not just the
-            # shell, or its children keep running and holding the pipes. Same
-            # contract as ``_CurrentCommands.run`` in plugins.tools._sandbox,
+            # shell, which may have exited while its children hold the pipes.
+            # Same contract as ``_CurrentCommands.run`` in plugins.tools._sandbox,
             # including the bounded wait for a setsid escapee killpg misses.
             with contextlib.suppress(OSError):
                 os.killpg(proc.pid, signal.SIGKILL)
