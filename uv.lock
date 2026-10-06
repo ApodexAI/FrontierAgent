@@ -208,7 +208,7 @@ wheels = [
 
 [[package]]
 name = "apodex-agent-core"
-version = "0.12.2"
+version = "0.14.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anthropic", extra = ["bedrock"] },
@@ -218,9 +218,9 @@ dependencies = [
     { name = "pydantic" },
     { name = "pyyaml" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/12/c9/23b18d730e5919990e32be0efb4739496186d00ac939bac71d5a1dac7bfc/apodex_agent_core-0.12.2.tar.gz", hash = "sha256:cb90cfdb55fde1f7a49fbcde963ebedc6ad947165c0697b40a1ce9cc4df316e1", size = 779546, upload-time = "2026-09-27T14:09:53.027Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/03/9f/2f8c888015bad668bd7e59bac5aeea4f421ec5b9c4b12388e25c90d9e265/apodex_agent_core-0.14.1.tar.gz", hash = "sha256:e7440d25a05f2b3f68e56a2d93acc3fa81c19a9a6d224f6ac0d4012131a4339b", size = 835606, upload-time = "2026-10-06T03:43:20.483Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/df/30/ba2ae097ad8adfa428b82dac71288a3cb50d78b29ae2ef44d97b4eda78db/apodex_agent_core-0.12.2-py3-none-any.whl", hash = "sha256:0905da54a6a1fbc76861927285d5f489fd16ed46dbfc5f6b20892af94594c6ff", size = 540845, upload-time = "2026-09-27T14:09:51.345Z" },
+    { url = "https://files.pythonhosted.org/packages/f8/32/cefa359ed6354dd2c492d46df90f4550c1dcbe3b04d65b2ffb28b475f942/apodex_agent_core-0.14.1-py3-none-any.whl", hash = "sha256:07dacc2d43b5681c67bf53e7be6c2e1bf1e6299dacb29b7f90eb42f8cfaba349", size = 559846, upload-time = "2026-10-06T03:43:18.776Z" },
 ]
 
 [[package]]
@@ -1013,7 +1013,7 @@ sandbox = [
 [package.metadata]
 requires-dist = [
     { name = "anthropic", specifier = ">=0.87.0" },
-    { name = "apodex-agent-core", specifier = "==0.12.2" },
+    { name = "apodex-agent-core", specifier = "==0.14.1" },
     { name = "browserbase", marker = "extra == 'plugins'", specifier = ">=0.1.0" },
     { name = "datasets", marker = "extra == 'eval'", specifier = ">=4.8.4" },
     { name = "e2b-code-interpreter", marker = "extra == 'sandbox'", specifier = ">=2.6.0" },
@@ -1363,8 +1363,8 @@ name = "httpcore2"
 version = "2.12.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "h11" },
-    { name = "truststore" },
+    { name = "h11", marker = "sys_platform != 'emscripten'" },
+    { name = "truststore", marker = "sys_platform != 'emscripten'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/be/ad/f4f0e57345f1870f3e8cb624e058d7eca6e5a27d33bcc3311d9b618734cd/httpcore2-2.12.0.tar.gz", hash = "sha256:9293522bba0aa7c4c8e9e3f040c16575bd8868e155a77fa30c7a9085a5eae648", size = 67548, upload-time = "2026-08-18T13:22:08.211Z" }
 wheels = [
