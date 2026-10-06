@@ -150,6 +150,11 @@ class ToolRisk:
     # dangerous shell). Unlike kimi's cosmetic red banner, this is wired into
     # the decision: the gate demands a deliberate typed confirmation.
     danger: str = ""
+    # Only a human answering THIS prompt may approve it: auto-approve,
+    # ``auto_for_me`` and saved allow rules never do. Set for bash commands the
+    # shared policy denies outright everywhere else (privilege escalation,
+    # remote/exfil clients, signal senders).
+    must_ask: bool = False
 
 
 # Destructive patterns that warrant a SECOND (typed) confirmation, even though
@@ -387,13 +392,20 @@ def assess_tool_risk(name: str, args: dict, cwd: str) -> ToolRisk:
         cmd = str(args.get("command", "")).strip()
         if _assess_bash_command is not None:
             try:
-                a = _assess_bash_command(cmd)
+                # ``interactive``: the shared policy's always-denied groups
+                # (sudo / ssh / kill …) come back as a group-tagged confirm, so
+                # the person at this gate decides instead of a blanket deny.
+                a = _assess_bash_command(cmd, interactive=True)
             except Exception:
                 # Fail closed: refuse rather than silently downgrading a
                 # possibly destructive command to a confirmable one.
                 return ToolRisk(RISK_DENY, "could not assess bash command safety", cmd)
             if a.level == "deny":
                 return ToolRisk(RISK_DENY, a.reason, cmd)
+            if getattr(a, "group", ""):
+                return ToolRisk(
+                    RISK_CONFIRM, a.reason, cmd, danger=a.reason, must_ask=True,
+                )
         # Read-only inspection (ls/find/grep/tree/git status/…) runs without a
         # prompt so the agent isn't blocked on every harmless command. Anything
         # that could mutate state still requires confirmation.
@@ -416,9 +428,11 @@ def assess_with_rules(
     1. A saved ``deny`` forces a block.
     2. Hard ``RISK_DENY`` (writes outside working directory, dangerous system blocks)
        is NEVER bypassed.
-    3. If ``auto_for_me`` is enabled (Docker / trusted env mode), any non-denied call
+    3. A ``must_ask`` call (privilege escalation, remote/exfil clients, signal
+       senders) always goes to the human; nothing below may downgrade it.
+    4. If ``auto_for_me`` is enabled (Docker / trusted env mode), any non-denied call
        is treated as safe.
-    4. If the user saved an explicit ``allow`` rule for this command/tool, downgrade
+    5. If the user saved an explicit ``allow`` rule for this command/tool, downgrade
        ``RISK_CONFIRM`` to ``RISK_SAFE`` — unless the call carries a ``danger``
        label (dep-install, force-push, delete, ...). A dangerous call never
        downgrades: the typed-confirmation gate must still fire.
@@ -426,7 +440,7 @@ def assess_with_rules(
     base = assess_tool_risk(name, args, cwd)
     if rules is not None and rules.denies(name, args):
         return ToolRisk(RISK_DENY, "denied by a saved rule", base.target)
-    if base.level == RISK_DENY:
+    if base.level == RISK_DENY or base.must_ask:
         return base
     if auto_for_me:
         return ToolRisk(RISK_SAFE, "auto for me (docker/trusted env)", base.target)
