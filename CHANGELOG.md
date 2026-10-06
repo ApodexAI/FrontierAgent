@@ -62,6 +62,40 @@ Initial open-source release of FrontierAgent.
 
 ### Fixed
 
+- **One trusted runtime filesystem state** (`plugins/tools/_filesystem_state.py`).
+  The workspace, outputs, inputs and scratch directories are derived once and
+  read by everyone: mount resolution, the file-tool gate, the deliverable
+  roots, `create_file`, the shell variables handed to model commands, and the
+  system prompts. They used to be re-derived in six places from a mix of
+  environment variables, scope metadata and backend guesses, so a sub-agent
+  could write a directory its main agent could not, a relocated outputs root
+  left the prompt naming `/outputs` while the writers used the override, and
+  native mode's own outputs directory was under no allowed prefix.
+  - An installed state settles the workspace root, so `ExecutionScope` metadata
+    can no longer widen filesystem access. Without one (a benchmark runner
+    passing a trial directory) the checked metadata path remains.
+  - A remote or bwrap state grants no host writes and is never resolved with
+    this host's `realpath`; the canonical mount points are reported instead of
+    host spellings.
+  - The read-only inputs directory is refused to every writer through
+    `output_write_error`, including via a symlink inside the workspace.
+  - `plugins/skills/` and `data/` are read-only: the skills tree's symlinks are
+    deliberately trusted, so a writable one is a persistent prompt-injection
+    channel.
+- **A write the path gate refused no longer reaches the host.** `write_file` and
+  `file_editor_create` fall back to the sandbox when local authorization fails,
+  and for the in-process `CurrentSandbox` that fallback is an `open()` in the
+  harness (as root, in container mode), so a refused path was written anyway.
+  That branch now authorizes the path itself; remote backends are unaffected.
+- **Paths are quoted before reaching a sandbox shell.** `file_editor`'s view /
+  create / str_replace commands, `write_file`'s `mkdir -p`, and the Docker
+  `mkdir -p` interpolated the path unquoted, so a path containing `;` ran
+  commands that never passed the bash policy.
+- **A system directory named as the workspace root grants nothing.** The root
+  arrives through `ExecutionScope` metadata (workload input), and
+  `{"workspace_root": "/etc"}` made `/etc` readable and writable. System roots
+  and direct children of `/usr` and `/etc` are refused; a run directory deep
+  under `/var` or `/opt` (a container volume, macOS `$TMPDIR`) still works.
 - Bash policy: privilege escalation (`sudo`/`su`/…), remote/exfil clients
   (`ssh`/`nc`/`rsync`/…) and signal senders (`kill`/`pkill`/`killall`) are now
   refused in every allowlist mode, including the default `off`. The local CLI

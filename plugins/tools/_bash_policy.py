@@ -185,10 +185,148 @@ def _norm_target(arg: str) -> str:
 _VAR_RE = re.compile(r"\$\{[^}]*\}|\$[\w@*#?!-]+")
 
 
+def _writable_roots() -> tuple[str, ...]:
+    """This run's own writable directories, resolved per call.
+
+    Read from the trusted runtime filesystem state, so they are exactly the
+    directories the prompts name, the file tools authorize and the shell
+    variables point at. Inputs are absent: that mount is read-only.
+    """
+    try:
+        from plugins.tools._filesystem_state import current_filesystem_state
+
+        return tuple(root for root in current_filesystem_state().scratch_roots() if root)
+    except Exception:
+        return ()
+
+
+def _local_filesystem_paths() -> bool:
+    """Whether these path spellings name THIS host's filesystem.
+
+    The same flag the file-tool gate uses, so the two cannot disagree about
+    whether resolving a path here describes the right machine.
+    """
+    try:
+        from plugins.tools._filesystem_state import current_filesystem_state
+
+        return current_filesystem_state().local_filesystem
+    except Exception:
+        return False
+
+
+def _real_path(path: str) -> str | None:
+    """``path`` with symlinks resolved, or ``None`` when it cannot be resolved.
+
+    Non-strict: a path that does not exist still resolves. An ``OSError`` (a
+    symlink loop, for instance) returns ``None`` and the caller keeps its
+    textual answer, so a failed lookup never DROPS a check.
+    """
+    try:
+        return os.path.realpath(path)
+    except OSError:
+        return None
+
+
+def _path_spellings(path: str) -> tuple[str, ...]:
+    """Every name this one path answers to: as written, and resolved.
+
+    Comparing spelling alone made protection depend on how a path was typed:
+    ``rm -rf /inputs`` was refused while ``rm -rf $(realpath /inputs)`` —
+    the same directory — was allowed, and on macOS ``/private/etc`` reached
+    ``/etc``. The runtime hands out both spellings itself, so this has to
+    compare identity.
+
+    Resolved only when the state says these paths are local AND the path is
+    absolute with no unexpanded variable: the shell's cwd is not this process's,
+    so resolving a relative operand would name a different file, and a remote
+    path must never be interpreted by this host.
+    """
+    written = _norm_target(path)
+    raw = path.strip().strip("'\"")
+    if (
+        not raw.startswith("/")
+        or _VAR_RE.search(raw)
+        or not _local_filesystem_paths()
+    ):
+        return (written,)
+    # The RAW path is resolved, not the normalized one: collapsing ``..``
+    # against a symlinked parent names a different file than the shell opens.
+    resolved = _real_path(raw)
+    return (written,) if resolved is None or resolved == written else (written, resolved)
+
+
+def _within_writable_root(path: str) -> bool:
+    """Whether ``path`` is strictly inside one of this run's writable roots.
+
+    The exemption that keeps a relocated mount usable: ``_REDIRECT_PROTECTED_RE``
+    matches a literal prefix, and a run directory legitimately sits under one —
+    macOS ``$TMPDIR`` is ``/var/folders/...``, a container volume is
+    ``/var/lib/app/run``. Refusing a redirect there while ``tee`` and ``cp`` to
+    the same path were allowed meant the deny message recommended the very
+    directory it had just refused, and the deliverable was lost.
+
+    ``..`` is collapsed before comparing, so this cannot be used to climb out.
+    An unexpanded variable is never treated as contained: its value is unknown
+    here.
+    """
+    raw = path.strip().strip("'\"")
+    if not raw.startswith("/") or _VAR_RE.search(raw):
+        return False
+    candidates = _path_spellings(raw)
+    for root in _writable_roots():
+        roots = {root}
+        if _local_filesystem_paths():
+            resolved_root = _real_path(root)
+            if resolved_root:
+                roots.add(resolved_root)
+        for root_spelling in roots:
+            prefix = root_spelling.rstrip("/") + "/"
+            if any(candidate.startswith(prefix) for candidate in candidates):
+                return True
+    return False
+
+
+def _relocated_protected_roots() -> tuple[str, ...]:
+    """Read-only roots of THIS run, wherever they were mounted.
+
+    ``_SYSTEM_ROOTS`` names the canonical ones; a run whose inputs are mounted
+    somewhere else entirely still must not have them deleted, and that mount
+    holds the only copy of the user's files.
+    """
+    try:
+        from plugins.tools._filesystem_state import current_filesystem_state
+
+        return tuple(
+            root for root in current_filesystem_state().read_only_roots() if root
+        )
+    except Exception:
+        return ()
+
+
 def _under_protected_root(path: str) -> bool:
-    return path in _PROTECTED_TARGETS or any(
-        path == root or path.startswith(root + "/") for root in _SYSTEM_ROOTS
-    )
+    """Whether ``path`` names a protected root, under any of its spellings.
+
+    ``_SYSTEM_ROOTS`` is matched AS WRITTEN and deliberately never resolved: on
+    macOS ``/var`` resolves to ``/private/var``, which contains ``$TMPDIR`` and
+    would then swallow this run's own outputs. The run's own read-only mounts
+    are matched under both spellings, which can only add denials.
+    """
+    for candidate in _path_spellings(path):
+        if candidate in _PROTECTED_TARGETS or any(
+            candidate == root or candidate.startswith(root + "/")
+            for root in _SYSTEM_ROOTS
+        ):
+            return True
+    for root in _relocated_protected_roots():
+        roots = {_norm_target(root), *(_path_spellings(root))}
+        for root_spelling in roots:
+            if any(
+                candidate == root_spelling
+                or candidate.startswith(root_spelling.rstrip("/") + "/")
+                for candidate in _path_spellings(path)
+            ):
+                return True
+    return False
 
 
 def _is_delete_protected(arg: str) -> bool:
@@ -201,7 +339,9 @@ def _is_delete_protected(arg: str) -> bool:
         return True
     if raw.startswith("~") or raw.startswith("$HOME") or raw.startswith("${HOME}"):
         return True
-    if _under_protected_root(a):
+    # The RAW argument, so ``_path_spellings`` can resolve it: ``_norm_target``
+    # has already collapsed ``..``, which loses symlink-parent semantics.
+    if _under_protected_root(raw if raw.startswith("/") else a):
         return True
     # An absolute-looking path whose variables strip to a protected root:
     # ``/$X`` -> ``/``, ``/$SYS/…`` -> ``/etc``. Requires a leading ``/`` so a
@@ -733,9 +873,13 @@ _AUDIT_BINARIES = frozenset({"pip", "pip3"})
 _INLINE_CODE_FLAGS = frozenset({"-c", "-e", "--command", "--eval"})
 
 _ASSIGN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+# The target capture stops at shell punctuation rather than taking every
+# non-space character: with ``\S*`` the single match ``>/outputs/a>/etc/passwd``
+# swallowed the second redirect, so a writable-root exemption on the first one
+# would have excused the write into ``/etc``.
 _REDIRECT_PROTECTED_RE = re.compile(
     r"(?:&>>?|>\||>&|>>?)\s*"
-    r"(/(?:etc|usr|bin|sbin|lib|lib64|boot|dev|proc|sys|var|root|opt)\b\S*)"
+    r"(/(?:etc|usr|bin|sbin|lib|lib64|boot|dev|proc|sys|var|root|opt)\b[^\s<>;&|()]*)"
 )
 # Character devices that every shell idiom redirects to. Discarding a stream
 # (``2>/dev/null``) or pointing one at the terminal/an existing fd is not a
@@ -2514,14 +2658,27 @@ def assess_bash_command(
             continue
         # ``\S*`` swallows any shell punctuation glued to the target
         # (``2>/dev/null;`` / ``>/dev/null)``) — trim it before classifying.
-        target = match.group(1).rstrip(";&|)\"'")
+        # Only quotes are stripped now: the pattern no longer swallows shell
+        # punctuation, so trimming ``;&|)`` would cut into a real filename.
+        target = match.group(1).strip("\"'")
         if _REDIRECT_SAFE_DEVICE_RE.match(target):
             continue
+        # This run's own writable directories, wherever they were mounted.
+        # Containment is computed after ``..`` collapsing, so this cannot be
+        # used to climb out of a writable root into a real system path.
+        if _within_writable_root(target):
+            continue
+        # Name the directories this run actually has rather than the canonical
+        # mounts: this text reaches the model right after it tried a path that
+        # was refused, which is exactly where a self-teaching error earns its
+        # keep. Every directory named here must itself accept a redirect —
+        # ``test_the_deny_reason_never_recommends_a_path_it_would_refuse``.
+        writable = ", ".join(_writable_roots()) or "/workspace, /outputs or /tmp"
         return BashCommandAssessment(
             level="deny",
             reason=(
                 f"Refuses output redirection into a protected system path "
-                f"(`{target}`). Write to /workspace, /outputs or /tmp instead; "
+                f"(`{target}`). Write to {writable} instead; "
                 f"`>/dev/null` to discard is fine."
             ),
         )

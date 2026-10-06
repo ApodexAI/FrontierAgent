@@ -399,6 +399,16 @@ def _build_tool_env(
     # mode has no inner namespace). Measured on 4 concurrent sub-agents writing
     # ``/tmp/scratch.csv``: all four read back the last writer's content.
     projected["TMPDIR"] = tmpdir
+    # Name this run's directories for model-authored commands. Projected from
+    # the trusted state rather than inherited, so a stale ``OUTPUT_DIR`` from
+    # the harness environment cannot point a command at a previous session's
+    # directory; the explicit ``tmpdir`` argument still wins, since the caller
+    # may own a private scratch root the state does not know about.
+    from plugins.tools._filesystem_state import current_filesystem_state
+
+    for key, value in current_filesystem_state().shell_env().items():
+        if key != "TMPDIR":
+            projected[key] = value
     # Keep pip/matplotlib/caches inside a HOME the tool user owns. Without
     # these they target root-owned paths and fail with bare permission errors
     # the model cannot act on.
@@ -2338,17 +2348,16 @@ def resolve_sandbox_mode(agent_cfg: dict[str, Any] | None = None) -> str:
 
 
 def resolve_mount_dirs() -> tuple[str, str, str]:
-    """Return ``(workspace_dir, outputs_dir, inputs_dir)`` for container mode.
+    """Return ``(workspace_dir, outputs_dir, inputs_dir)`` for this run.
 
-    Defaults to the production mount points ``/workspace``, ``/outputs``,
-    ``/inputs``; each is overridable via ``FRONTIER_AGENT_WORKSPACE_DIR`` /
-    ``FRONTIER_AGENT_OUTPUTS_DIR`` / ``FRONTIER_AGENT_INPUTS_DIR`` so a local run
-    (no root) can point them at repo-relative dirs.
+    Now a thin read of :mod:`plugins.tools._filesystem_state`, which is the one
+    place these are derived (from the same ``FRONTIER_AGENT_*_DIR`` overrides
+    when no state is installed). Kept as a function because every existing
+    caller asks for exactly this triple.
     """
-    ws = os.environ.get("FRONTIER_AGENT_WORKSPACE_DIR", "").strip() or _DEFAULT_WORKSPACE_DIR
-    out = os.environ.get("FRONTIER_AGENT_OUTPUTS_DIR", "").strip() or _DEFAULT_OUTPUTS_DIR
-    inp = os.environ.get("FRONTIER_AGENT_INPUTS_DIR", "").strip() or _DEFAULT_INPUTS_DIR
-    return ws, out, inp
+    from plugins.tools._filesystem_state import current_filesystem_state
+
+    return current_filesystem_state().dirs()
 
 
 def spill_root() -> Path:
@@ -2974,6 +2983,22 @@ def shell_quote(s: str) -> str:
     return "'" + s.replace("'", "'\\''") + "'"
 
 
+def _local_write_refusal(path: str) -> str:
+    """Why the path gate refuses writing ``path`` on this host, or "".
+
+    Only consulted for the in-process write branch below. Imported lazily:
+    ``_path_auth`` imports this module.
+    """
+    try:
+        from plugins.tools._path_auth import _is_path_allowed
+    except Exception as exc:  # pragma: no cover - broken install
+        return f"path authorization unavailable: {exc}"
+    allowed, reason = _is_path_allowed(path, write_access=True)
+    if allowed:
+        return ""
+    return reason or f"write to {path!r} is not authorized"
+
+
 def sandbox_write_file(
     sandbox: Any, path: str, content: str, *, mode: str = "w",
 ) -> tuple[bool, str]:
@@ -2995,9 +3020,19 @@ def sandbox_write_file(
     # (128 KB), so routing deliverables through it fails with E2BIG somewhere
     # around 96 KB of content — and container mode has no /tmp fallback, so the
     # write becomes a hard error. The harness process already has the mount
-    # bound read-write and the path has passed ``_path_auth``; writing it
-    # directly is both unlimited and cheaper (no bwrap + python3 spawn).
+    # bound read-write, so writing it directly is both unlimited and cheaper
+    # (no bwrap + python3 spawn).
+    #
+    # This branch is an ordinary ``open()`` in the harness process — as root, in
+    # container mode — so it is NOT a sandbox boundary, and the path has to be
+    # authorized HERE. Its callers (``write_file``, ``file_editor_create``)
+    # reach the sandbox precisely when ``_path_auth`` refused a local write, and
+    # for a CurrentSandbox that made the refusal a detour rather than a denial:
+    # a path the gate rejected was written to the host anyway.
     if isinstance(sandbox, CurrentSandbox):
+        reason = _local_write_refusal(path)
+        if reason:
+            return False, reason
         try:
             p = Path(path)
             new_parent = not p.parent.exists()
@@ -3025,7 +3060,7 @@ def sandbox_write_file(
     if mode == "w" and isinstance(sandbox, DockerSandbox):
         parent = os.path.dirname(path)
         if parent:
-            sandbox.commands.run(f"mkdir -p {parent}", timeout=10)
+            sandbox.commands.run(f"mkdir -p {shell_quote(parent)}", timeout=10)
         with tempfile.NamedTemporaryFile(
             mode="w", encoding="utf-8", delete=False, suffix=".tmp",
         ) as f:

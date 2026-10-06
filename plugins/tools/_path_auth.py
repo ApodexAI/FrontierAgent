@@ -14,7 +14,10 @@ logger = logging.getLogger(__name__)
 
 _SERVICE_CHECKOUT_ROOT = Path(__file__).resolve().parents[2]
 
-# Allowed directory prefixes (relative paths for project dirs, absolute for output)
+# Static prefixes, allowed for READS only (see ``_allowed_local_prefixes``).
+# These are the service's own resources rather than this run's directories: a
+# skill body to load, a bundled dataset. Writes belong to the run's own
+# directories, which the trusted filesystem state names.
 _ALLOWED_RELATIVE_PREFIXES = [
     "plugins/skills/",
     "data/",
@@ -22,6 +25,8 @@ _ALLOWED_RELATIVE_PREFIXES = [
 
 #: The operator-curated skills tree. Its symlinks are trusted (see
 #: :func:`_candidate_paths`), so it is named once rather than spelled inline.
+#: That trust is exactly why it must not be writable: a model that can add a
+#: ``SKILL.md`` there writes instructions the next run loads as its own.
 _SKILLS_DIR = str(_SERVICE_CHECKOUT_ROOT / "plugins" / "skills")
 
 _ALLOWED_ABSOLUTE_PREFIXES = [
@@ -41,8 +46,66 @@ _BLOCKED_SUFFIXES = (".key", ".pem", ".cert")
 _WORD_SPLIT = re.compile(r"[^a-z0-9]+")
 
 
+#: Roots that can never BECOME a workspace: naming one as the workspace root
+#: would authorize the whole system tree for reads, and — outside the service
+#: checkout, which is the only thing ``_is_isolated_workspace_root`` refuses —
+#: for writes too. The workspace root arrives through ExecutionScope metadata,
+#: which carries workload input: a benchmark runner's trial directory is a
+#: legitimate value, ``/etc`` is not, and this module cannot tell which caller
+#: filled the key in. So the VALUE is constrained rather than the caller.
+#:
+#: A path may still live under one of these (a container's ``/var/lib/...``
+#: volume, ``/opt/app/run-17``): only naming the root itself, or a direct
+#: system subdirectory of it, is refused. ``/tmp`` is absent — a scratch
+#: workspace under it is ordinary — and so is ``/home``, whose per-user
+#: subdirectories are where a local CLI run actually lives.
+_NEVER_A_WORKSPACE_ROOT = frozenset({
+    "/", "/etc", "/usr", "/bin", "/sbin", "/lib", "/lib64", "/boot", "/dev",
+    "/proc", "/sys", "/var", "/root", "/opt", "/home",
+})
+
+
+#: Roots whose direct children are no more suitable than the root itself:
+#: ``/usr/local`` and ``/etc/cron.d`` grant exactly the writes that make naming
+#: them an escalation. ``/var`` and ``/opt`` are deliberately absent — a
+#: container volume at ``/var/lib/app/run`` and macOS ``$TMPDIR`` under
+#: ``/var/folders/...`` are real run directories, and refusing them is the
+#: over-denial that loses a run's deliverables.
+_NEVER_A_WORKSPACE_PARENT = frozenset({"/usr", "/etc", "/bin", "/sbin", "/boot", "/proc", "/sys"})
+
+
+def _is_system_root(candidate: Path) -> bool:
+    """Whether ``candidate`` is a system root, or a direct child of a system
+    directory whose children are equally unsuitable."""
+    return (
+        str(candidate) in _NEVER_A_WORKSPACE_ROOT
+        or str(candidate.parent) in _NEVER_A_WORKSPACE_PARENT
+    )
+
+
 def _configured_workspace_root() -> Path | None:
-    """Return the explicit workspace root, if one was configured for this task."""
+    """Return the explicit workspace root, if one was configured for this task.
+
+    When trusted code installed a runtime filesystem state, that state IS the
+    answer and request-side metadata is not consulted at all: a workflow node
+    and the CLI know their own directories, while ``ExecutionScope`` metadata
+    carries workload input and reached this function from wherever the request
+    came from. A remote state yields ``None`` — those paths name the sandbox's
+    filesystem, not this host's.
+
+    Without an installed state the legacy metadata path remains, with the value
+    checked rather than its source (see ``_NEVER_A_WORKSPACE_ROOT``): the
+    benchmark runner passes a trial directory this way.
+    """
+    from plugins.tools._filesystem_state import installed_filesystem_state
+
+    state = installed_filesystem_state()
+    if state is not None:
+        if not state.local_filesystem or not state.workspace:
+            return None
+        root = Path(state.workspace).expanduser().resolve()
+        return root if root.is_dir() else None
+
     scope = get_current_execution_scope()
     metadata = scope.metadata if scope else {}
     raw_root = (
@@ -55,6 +118,12 @@ def _configured_workspace_root() -> Path | None:
     workspace_root = Path(raw_root).expanduser().resolve()
     if not workspace_root.is_dir():
         logger.warning("Ignoring invalid CODING_WORKSPACE_ROOT '%s'", raw_root)
+        return None
+    if _is_system_root(workspace_root):
+        logger.warning(
+            "Refusing workspace root '%s': a system directory cannot be a "
+            "workspace, so it grants no filesystem access", raw_root,
+        )
         return None
     return workspace_root
 
@@ -293,8 +362,39 @@ def _allowed_local_prefixes(
     write_access: bool = False,
     workspace_root: Path | None = None,
 ) -> list[str]:
-    """Return the local path prefixes allowed in the current execution context."""
-    prefixes = list(_ALLOWED_RELATIVE_PREFIXES) + list(_ALLOWED_ABSOLUTE_PREFIXES)
+    """Return the local path prefixes allowed in the current execution context.
+
+    Reads and writes are deliberately asymmetric. Reads may reach the service's
+    own static resources (bundled skills and data) and this run's read-only
+    mounts. Writes may only reach directories that BELONG to this run, named by
+    the trusted filesystem state — never the service checkout's own tree, and
+    never a path a request asked for.
+    """
+    from plugins.tools._filesystem_state import current_filesystem_state
+
+    state = current_filesystem_state()
+    prefixes: list[str] = []
+    if write_access:
+        # ``plugins/skills/`` and ``data/`` are service resources, and the
+        # skills tree's symlinks are explicitly trusted by ``_candidate_paths``.
+        # A model that could write there would be writing instructions a later
+        # run loads as its own, so the write branch starts empty and the run's
+        # own directories are added below.
+        #
+        # ``/tmp/agent-outputs/`` stays: it is the last-resort fallback
+        # ``write_file`` degrades to when no sandbox is reachable at all.
+        prefixes.append("/tmp/agent-outputs/")
+        # Only for a LOCAL backend do this run's directories name paths on this
+        # host. Under bwrap the canonical ``/workspace`` is a mount of a
+        # differently-named host directory, and under a remote backend the path
+        # does not exist here at all — authorizing either would grant a host
+        # write on the strength of a path describing another namespace.
+        if state.local_filesystem:
+            prefixes.extend(root for root in state.write_roots() if root)
+    else:
+        prefixes.extend(_ALLOWED_RELATIVE_PREFIXES)
+        prefixes.extend(_ALLOWED_ABSOLUTE_PREFIXES)
+
     resolved_workspace_root = workspace_root or _configured_workspace_root()
     if resolved_workspace_root is not None:
         if write_access and not _is_isolated_workspace_root(resolved_workspace_root):
