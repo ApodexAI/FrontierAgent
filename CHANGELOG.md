@@ -65,6 +65,15 @@ Initial open-source release of FrontierAgent.
 
 ### Fixed
 
+- **Shell nesting past the parser's recursion limit no longer bypasses the
+  group denials.** `_parse_commands` stopped recursing at four levels and
+  stopped *silently*, so `$($($($($($(sudo id))))))` assessed as `allow` in
+  `off` mode — the mode most deployments run — against rules that are supposed
+  to bind unconditionally. At the limit the remaining text is now screened by
+  its words in a single pass, so any depth is refused and the verdict still
+  names the group. Recursing further instead would raise `RecursionError`
+  (a crash, not a verdict), and peeling the chain layer by layer cost a scan
+  per layer (11s at depth 5,000). Benign nesting is unchanged at every depth.
 - Keep bash protection on resolved local system aliases such as macOS
   `/private/etc`, while exempting the run's own writable mounts. Recursive
   deletion and mutation refuse ancestors and wildcard selections of read-only

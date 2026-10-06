@@ -2546,6 +2546,35 @@ def _argv_group_deny(commands: list[list[str]]) -> tuple[str, str] | None:
     return None
 
 
+#: Expansion punctuation, blanked in one pass by :func:`_expansion_words`.
+_EXPANSION_PUNCT_RE = re.compile(r"\$\(\(|\$\(|<\(|>\(|[`()]")
+
+
+def _expansion_words(bodies: list[str]) -> list[str]:
+    """Every word inside ``bodies``, with expansion punctuation removed.
+
+    Deliberately a WORD screen rather than a parse. Peeling a chain layer by
+    layer costs a scan per layer, so a 5,000-deep string took 11s — and it
+    still lost the payload once it hit any step bound, which is the bypass this
+    is here to close. Blanking ``$(``, backticks and parentheses in one linear
+    pass drops ``sudo id`` out of any depth for the price of one scan.
+
+    Conservative by construction: it cannot tell a command name from a word
+    that merely looks like one, so ``$($($($($($(echo ssh))))))`` is refused on
+    the strength of ``ssh`` appearing in it. That only applies past
+    ``_MAX_NEST``, which no real command reaches, and it can only ADD
+    refusals — the alternative is assessing those levels not at all.
+    """
+    words: list[str] = []
+    for body in bodies:
+        flat = _EXPANSION_PUNCT_RE.sub(" ", body)
+        try:
+            words.extend(tokenize_shell_segment(flat))
+        except ValueError:
+            words.extend(flat.split())
+    return words
+
+
 def _parse_commands(command: str, depth: int = 0) -> list[list[str]]:
     """Parse into a list of argv lists (one per simple command), recursively
     including commands nested in ``$(...)`` / backticks, in the code argument of
@@ -2581,9 +2610,6 @@ def _parse_commands(command: str, depth: int = 0) -> list[list[str]]:
     for argv in list(argvs):
         argvs.extend(_find_exec_payloads(argv))
 
-    if depth >= _MAX_NEST:
-        return argvs
-
     nested = _extract_nested_shell(stripped) + list(heredoc_bodies)
     for raw_argv in list(argvs):
         # ``_shell_code_args`` unwraps prefixes first, so ``env bash -c …`` /
@@ -2596,6 +2622,26 @@ def _parse_commands(command: str, depth: int = 0) -> list[list[str]]:
         # (Layer 1.5) and the allowlist never saw ``watch 'sudo id'``.
         nested.extend(_evaluator_payloads(raw_argv)[0])
         nested.extend(_env_split_payloads(raw_argv))
+    if depth >= _MAX_NEST:
+        # The recursion stops here — and stopping SILENTLY is the one direction
+        # a policy must not fail in: every level below was assessed by nobody,
+        # so a group denial that is supposed to bind in EVERY mode could be
+        # walked around with enough parentheses. Measured in ``off`` mode
+        # against a limit of 4:
+        #     $($($($($($(sudo id))))))   -> allow
+        # ``enforce`` denied it, but only because the masked sentinel left in
+        # executable position is off the allowlist — incidental, not the rule
+        # that should have applied.
+        #
+        # The remaining text is screened by its WORDS instead (see
+        # ``_expansion_words``). Recursing on would trade the bypass for a
+        # ``RecursionError`` — a crash rather than a verdict — and peeling the
+        # layers one at a time costs a scan per layer.
+        # One argv per word, so every one of them is a candidate executable
+        # for the group check rather than only the first.
+        argvs.extend([word] for word in _expansion_words(nested) if word.strip())
+        return argvs
+
     for sub in nested:
         if sub.strip():
             # Unparseable nested code — the outer parse already recorded it.
