@@ -220,6 +220,101 @@ def test_every_writer_refuses_the_read_only_inputs_directory(local_state, run_di
         assert _deliverable_policy.output_write_error(path), path
 
 
+@pytest.mark.parametrize("mode", ["native", "container"])
+@pytest.mark.parametrize("alias", ["/workspace/inputs", "/inputs", "/outputs/inputs"])
+@pytest.mark.parametrize("writer", ["write_file", "create_file", "file_editor_create", "file_editor_str_replace"])
+async def test_writers_refuse_input_aliases(tmp_path, monkeypatch, mode, alias, writer) -> None:
+    """Exercise the tools themselves, including aliases beneath writable roots."""
+    workspace = tmp_path / "workspace"
+    outputs = tmp_path / "outputs"
+    workspace.mkdir()
+    outputs.mkdir()
+    inputs = workspace / "inputs"
+    inputs.mkdir()
+    (outputs / "inputs").symlink_to(inputs, target_is_directory=True)
+    target = inputs / "data.txt"
+    target.write_text("original input")
+    monkeypatch.setenv("SANDBOX_BACKEND", mode)
+    token = install_filesystem_state(state_for_sandbox_mode(
+        mode, workspace=str(workspace), outputs=str(outputs), inputs=str(inputs),
+    ))
+    module = "file_editor" if writer.startswith("file_editor_") else writer
+    tool = getattr(importlib.import_module(f"plugins.tools.{module}"), writer)
+    args = {"path": f"{alias}/data.txt"}
+    if writer == "file_editor_str_replace":
+        args.update(old_str="original", new_str="overwritten")
+    else:
+        args["content"] = "overwritten input"
+    try:
+        assert "read-only input directory" in (
+            _deliverable_policy.output_write_error(args["path"]) or ""
+        )
+        result = await tool.ainvoke(args)
+        assert "read-only input directory" in result
+        assert target.read_text() == "original input"
+    finally:
+        reset_filesystem_state(token)
+
+
+@pytest.mark.parametrize("mode", ["bwrap", "auto", "native", "container"])
+async def test_team_node_renders_prompts_after_installing_state(tmp_path, monkeypatch, mode) -> None:
+    """Run the real node setup up to prompt construction, without invoking an LLM."""
+    from types import SimpleNamespace
+
+    node = importlib.import_module("workflows.agent_team.nodes.main_agent")
+    host_dirs = tuple(str(tmp_path / name) for name in ("workspace", "outputs", "inputs"))
+    for path in host_dirs:
+        Path(path).mkdir()
+    monkeypatch.setenv("SANDBOX_BACKEND", mode)
+    for name, path in zip(("WORKSPACE", "OUTPUTS", "INPUTS"), host_dirs, strict=True):
+        monkeypatch.setenv(f"FRONTIER_AGENT_{name}_DIR", path)
+    monkeypatch.setattr(node, "_resolve_llm_and_profile", lambda *a, **k: (
+        object(), {"agent": {"planning_mode": False, "reporter": False}}, None,
+    ))
+    monkeypatch.setattr(node.registry, "get", lambda *a: object())
+    monkeypatch.setattr(node.registry, "get_optional", lambda *a: None)
+    monkeypatch.setattr(node, "_resolve_profile_tools", lambda *a, **k: ([], []))
+    monkeypatch.setattr(node, "_build_observers", lambda **k: [])
+    monkeypatch.setattr(node, "_resolve_trajectory_dir", lambda *a: tmp_path)
+    monkeypatch.setattr(node, "_resolve_worktree_root", lambda *a: Path(host_dirs[0]))
+    monkeypatch.setattr(node, "_resolve_sandbox_binds", lambda *a: ((), (), host_dirs[1]))
+    monkeypatch.setattr(node, "_log_inputs_dir_contents", lambda *a, **k: None)
+
+    class PromptsCaptured(Exception):
+        pass
+
+    render = node.render_sandbox_fs_note
+    notes = {}
+    states = []
+
+    def capture(**kwargs):
+        states.append(current_filesystem_state().dirs())
+        notes[kwargs["audience"]] = render(**kwargs)
+        if len(notes) == 2:
+            raise PromptsCaptured
+        return notes[kwargs["audience"]]
+
+    monkeypatch.setattr(node, "render_sandbox_fs_note", capture)
+    # The node is intentionally stopped during setup. Restore the outer context
+    # even if it installed a state before the capture exception.
+    token = install_filesystem_state(state_from_environment())
+    try:
+        with pytest.raises(PromptsCaptured):
+            await node.main_agent_node(
+                {"original_question": "inspect inputs", "metadata": {}},
+                SimpleNamespace(task_id="filesystem-test"),
+            )
+        expected = host_dirs if mode in ("native", "container") else ("/workspace", "/outputs", "/inputs")
+        assert states == [expected, expected]
+        for note in notes.values():
+            assert expected[0] in note
+            assert expected[1] in note
+            if mode in ("bwrap", "auto"):
+                assert str(tmp_path) not in note
+    finally:
+        reset_filesystem_state(token)
+
+
 def test_the_run_can_still_write_its_own_directories(local_state, run_dirs) -> None:
     for path in (run_dirs / "outputs" / "r.md", run_dirs / "workspace" / "t.py"):
         assert runtime_file_write_error(str(path)) is None

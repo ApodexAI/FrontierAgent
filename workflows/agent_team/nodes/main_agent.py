@@ -1065,16 +1065,6 @@ async def main_agent_node(
                 src = dataset_root / src
             input_sources.append(src)
         inputs_available = any(_has_input_files(str(src)) for src in input_sources)
-    main_fs_note = render_sandbox_fs_note(
-        sandbox_mode=sandbox_mode,
-        inputs_available=inputs_available,
-        audience="main",
-    )
-    sub_fs_note = render_sandbox_fs_note(
-        sandbox_mode=sandbox_mode,
-        inputs_available=inputs_available,
-        audience="sub",
-    )
     stream_repetition_config = parse_stream_repetition_config(agent_cfg)
     sub_agent_llm = llm
     llm, stream_repetition_observer = wrap_llm_for_stream_repetition(
@@ -1310,6 +1300,19 @@ async def main_agent_node(
         outputs=str(outputs_dir),
         inputs=str(inputs_dir),
     ))
+
+    # Render after installation: environment overrides may name host directories
+    # that bwrap exposes under entirely different, canonical mount paths.
+    main_fs_note = render_sandbox_fs_note(
+        sandbox_mode=sandbox_mode,
+        inputs_available=inputs_available,
+        audience="main",
+    )
+    sub_fs_note = render_sandbox_fs_note(
+        sandbox_mode=sandbox_mode,
+        inputs_available=inputs_available,
+        audience="sub",
+    )
 
     swarm_runtime = SwarmSubagentRuntime(
         original_question=question,

@@ -578,8 +578,11 @@ def output_write_error(path: str) -> str | None:
     forgotten by the next writer).
     """
     from plugins.tools._filesystem_state import runtime_file_write_error
+    from plugins.tools._sandbox import resolve_runtime_path
 
-    if error := runtime_file_write_error(path):
+    # Check the target the writer will open, including canonical mount aliases.
+    # Otherwise /workspace/inputs/x bypasses a relocated read-only input root.
+    if error := runtime_file_write_error(resolve_runtime_path(path)):
         return error
     if error := spill_write_error(path):
         return error
