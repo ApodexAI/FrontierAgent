@@ -322,7 +322,11 @@ def test_resolution_never_carries_a_value(launch, user_file) -> None:
 
 
 def test_forwarded_names_are_names_only_and_only_when_set(launch, user_file, monkeypatch) -> None:
-    _write(user_file, f"OPENAI_API_KEY={_SECRET}\nCUSTOM_PROVIDER_TOKEN=abc\n")
+    _write(
+        user_file,
+        f"OPENAI_API_KEY={_SECRET}\nCUSTOM_PROVIDER_TOKEN=abc\n"
+        "WEB_SEARCH_PROVIDER=parallel\n",
+    )
     monkeypatch.setenv("SERPER_API_KEY", "serper-secret")
     monkeypatch.delenv("JINA_API_KEY", raising=False)
 
@@ -331,6 +335,7 @@ def test_forwarded_names_are_names_only_and_only_when_set(launch, user_file, mon
 
     assert "OPENAI_API_KEY" in names  # from the file
     assert "CUSTOM_PROVIDER_TOKEN" in names  # file-defined, even if unlisted
+    assert "WEB_SEARCH_PROVIDER" in names  # provider selected in the user file
     assert "SERPER_API_KEY" in names  # well-known and exported
     assert "JINA_API_KEY" not in names  # well-known but not set
     assert _SECRET not in " ".join(names)
@@ -338,12 +343,14 @@ def test_forwarded_names_are_names_only_and_only_when_set(launch, user_file, mon
 
 def test_empty_resolution_forwards_only_exported_well_known_names(monkeypatch) -> None:
     monkeypatch.setenv("OPENAI_MODEL", "m")
+    monkeypatch.setenv("WEB_SEARCH_PROVIDER", "parallel")
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
     names = EnvResolution.empty().forwarded_names()
 
     assert "OPENAI_MODEL" in names
     assert "OPENAI_API_KEY" not in names
+    assert "WEB_SEARCH_PROVIDER" not in names
 
 
 # ── the CLI: --cwd, --model, and where .env is looked up ──────────────────

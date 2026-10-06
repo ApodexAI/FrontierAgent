@@ -289,6 +289,21 @@ def localize_path_args(name: str, args: dict, cwd: str) -> dict | None:
         except Exception:
             continue
         if not (rel == ".." or rel.startswith(".." + os.sep)):
+            # Native workflow mode deliberately separates the user's project
+            # (cwd) from its run-private execution workspace. The workflow
+            # read_file resolves relative paths in that private workspace, so
+            # converting a correct absolute project path to "README.md" would
+            # make it read the wrong filesystem location.
+            runtime_workspace = os.environ.get(
+                "FRONTIER_AGENT_WORKSPACE_DIR", ""
+            ).strip()
+            if name == "read_file" and runtime_workspace:
+                try:
+                    workspace_real = os.path.realpath(runtime_workspace)
+                except Exception:
+                    workspace_real = ""
+                if workspace_real and workspace_real != cwd_real:
+                    return None
             new = dict(args)
             new[key] = rel or "."
             return new
@@ -418,7 +433,9 @@ def assess_with_rules(
     4. If ``auto_for_me`` is enabled (Docker / trusted env mode), any non-denied call
        is treated as safe.
     5. If the user saved an explicit ``allow`` rule for this command/tool, downgrade
-       ``RISK_CONFIRM`` to ``RISK_SAFE``.
+       ``RISK_CONFIRM`` to ``RISK_SAFE`` — unless the call carries a ``danger``
+       label (dep-install, force-push, delete, ...). A dangerous call never
+       downgrades: the typed-confirmation gate must still fire.
     """
     base = assess_tool_risk(name, args, cwd)
     if rules is not None and rules.denies(name, args):
@@ -427,6 +444,11 @@ def assess_with_rules(
         return base
     if auto_for_me:
         return ToolRisk(RISK_SAFE, "auto for me (docker/trusted env)", base.target)
+    if base.level == RISK_CONFIRM and base.danger:
+        # Saved allows only downgrade *plain* confirms. ``observers`` skips
+        # ``confirm()`` entirely when level is SAFE, so preserving ``danger``
+        # on a SAFE result would still bypass the typed-yes gate.
+        return base
     if base.level == RISK_CONFIRM and rules is not None and rules.allows(name, args):
         return ToolRisk(RISK_SAFE, "allowed by a saved rule", base.target)
     return base

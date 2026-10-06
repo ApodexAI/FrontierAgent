@@ -38,7 +38,7 @@ without keeping a checkout around, use
 | macOS laptop or desktop | native, optionally Docker | hosted/remote endpoint | [macOS](macos.md) |
 | macOS or Linux, the CLI as a globally installed tool | `uv tool install`, native or Docker | hosted/remote endpoint | [Global install](global-install.md) |
 | Linux laptop, server, or CI without a local model | `scripts/run-linux.sh` (native, bubblewrap, or Docker) | hosted/remote endpoint | [Linux](linux.md) |
-| Any host with Docker and no local Python environment | published agent container | hosted/remote endpoint | [Docker and Compose](docker.md) |
+| Any host with Docker and no local Python environment | agent container built from this checkout (or the private published image) | hosted/remote endpoint | [Docker and Compose](docker.md) |
 | Linux bare metal or VM with an NVIDIA GPU and Docker daemon | native or agent container | SGLang container | [Linux NVIDIA + Docker](linux-nvidia.md) |
 | RunPod-style service that accepts your image at instance creation | inside the provider container | prebuilt FrontierAgent GPU image | [GPU cloud images](gpu-platforms.md) |
 | Existing x86_64 Linux GPU environment without nested Docker | `scripts/run-linux-gpu.sh` | isolated native SGLang process | [Linux NVIDIA native](linux-nvidia-native.md) |

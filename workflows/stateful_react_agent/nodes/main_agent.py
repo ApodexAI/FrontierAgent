@@ -1162,6 +1162,10 @@ async def react_agent_node(state: dict[str, Any], ctx: NodeContext) -> dict[str,
             steps=result.metadata.get("react_steps", []),
         ),
         "react_steps": result.metadata.get("react_steps", []),
+        # Authoritative loop telemetry. ``react_steps`` counts tool results,
+        # not LLM turns, so it cannot substitute for either counter.
+        "turns_used": result.turns_used,
+        "tool_calls_count": result.tool_calls_count,
         "language": answer_language,
         # Keep the user-facing answer non-empty while preserving the old
         # machine-readable infra/eval failure signal out of band.

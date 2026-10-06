@@ -39,8 +39,12 @@ def test_default_compose_pulls_release_image_and_preserves_cli_state() -> None:
     assert agent["pull_policy"] == "always"
     assert agent["environment"]["APODEX_IN_CONTAINER"] == "1"
     assert agent["environment"]["SANDBOX_BACKEND"] == "container"
+    assert agent["environment"]["FRONTIER_AGENT_REQUIRE_TOOL_USER"] == "1"
     assert "security_opt" not in agent
     assert ".:/project" in agent["volumes"]
+    # Compose injects these files into the harness environment, but the
+    # project bind must not expose their on-disk contents to tool commands.
+    assert "/dev/null:/project/.env:ro" in agent["volumes"]
     assert agent["working_dir"] == "/project"
     assert "./.apodex/runs:/apodex-runs" in agent["volumes"]
     assert "frontier-agent-inputs:/inputs:ro" in agent["volumes"]
@@ -57,6 +61,18 @@ def test_default_compose_pulls_release_image_and_preserves_cli_state() -> None:
         "/apodex-runs"
     )
     assert agent["environment"]["APODEX_WORKSPACE_LINK"] == "/workspace"
+
+    evaluator = compose["services"]["eval"]
+    assert evaluator["environment"]["SANDBOX_BACKEND"] == "bwrap"
+    assert evaluator["environment"]["SANDBOX_PROFILE"] == "service"
+
+    for overlay, filename in (
+        ("compose.sglang.yaml", ".env.sglang"),
+        ("compose.transformers.yaml", ".env.transformers"),
+    ):
+        assert f"/dev/null:/project/{filename}:ro" in (
+            _yaml(overlay)["services"]["agent"]["volumes"]
+        )
 
 
 def test_development_compose_is_the_only_compose_file_that_builds() -> None:

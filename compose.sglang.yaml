@@ -65,6 +65,8 @@ services:
         max-file: "3"
 
   agent:
+    volumes:
+      - /dev/null:/project/.env.sglang:ro
     depends_on:
       model:
         condition: service_healthy

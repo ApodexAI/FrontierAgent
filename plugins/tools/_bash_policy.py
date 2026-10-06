@@ -1065,7 +1065,7 @@ def _split_top_level(command: str) -> list[str]:
             i = end
             continue
         if quote != "'" and c == "`":  # backtick span — copy to its closer
-            end = _backtick_end(command, i)
+            _body, end = _backtick_body(command, i + 1)
             end = n if end < 0 else end
             buf.append(command[i:end])
             i = end
@@ -1124,6 +1124,12 @@ def _split_top_level(command: str) -> list[str]:
 _SUBSTITUTION_SENTINEL = "__FA_COMMAND_SUBSTITUTION__"
 _ARITHMETIC_SENTINEL = "__FA_ARITHMETIC_EXPANSION__"
 
+#: One expansion the shell evaluates: its outer extent, its body, and what kind
+#: it is. ``body`` is non-empty only when the text the shell executes is not a
+#: verbatim slice of the input (a backtick span, whose escapes bash removes
+#: before parsing); otherwise the body is ``command[inner_start:inner_end]``.
+_Span = tuple[int, int, int, int, str, str]
+
 
 def _find_expansion_end(command: str, start: int, depth: int) -> int:
     """Index just past the parens closing an expansion that opened at ``start``,
@@ -1131,53 +1137,125 @@ def _find_expansion_end(command: str, start: int, depth: int) -> int:
 
     Quoted parens do not count: ``$(echo ")")`` ends at the last ``)``, not the
     quoted one.
+
+    Like bash, every nested ``$(`` / ``<(`` / ``>(`` starts with its OWN quote
+    state, so the quotes in ``$(echo "$(echo ")'")" $(sudo id))`` pair up inside
+    the inner substitution and the scan still reaches ``sudo id``. A single
+    quote state shared across levels desynchronised there and ended the outer
+    span early, which hid the last command from every check. The levels live on
+    a list rather than the call stack, so deep nesting cannot hit the recursion
+    limit. A backtick span is skipped whole.
     """
-    j, n = start, len(command)
+    n = len(command)
+    quotes: list[str | None] = [None]  # quote state of each open level
+    depths = [depth]                   # unquoted "(" nesting inside each level
+    i = start
+    while i < n:
+        c = command[i]
+        quote = quotes[-1]
+        if quote == "'":
+            if c == "'":
+                quotes[-1] = None
+        elif c == "\\":
+            i += 1
+        elif command.startswith("(", i + 1) and (c == "$" or (c in "<>" and quote is None)):
+            quotes.append(None)
+            depths.append(1)
+            i += 1
+        elif c == "`":
+            i += 1
+            while i < n and command[i] != "`":
+                i += 2 if command[i] == "\\" else 1
+        elif c == '"':
+            quotes[-1] = None if quote else '"'
+        elif quote is None:
+            if c == "'":
+                quotes[-1] = "'"
+            elif c == "(":
+                depths[-1] += 1
+            elif c == ")":
+                depths[-1] -= 1
+                if depths[-1] == 0:
+                    if len(depths) == 1:
+                        return i + 1
+                    depths.pop()
+                    quotes.pop()
+        i += 1
+    return -1
+
+
+def _backtick_body(command: str, i: int) -> tuple[str, int]:
+    """Read a backtick body and apply bash's first-pass escape removal.
+
+    Inside backticks, a backslash before ``$``, a backtick, a backslash or a
+    newline is removed before the body is parsed as shell code; other
+    backslashes are retained. Without this, ``echo `echo \\`sudo id\\``` left
+    the escapes in place and the inner command was never recognised.
+
+    Returns the decoded body and the index just past the closing backtick, or
+    ``-1`` for that index when it never closes.
+    """
+    body: list[str] = []
+    n = len(command)
+    while i < n:
+        c = command[i]
+        if c == "`":
+            return "".join(body), i + 1
+        if c == "\\" and i + 1 < n and command[i + 1] in "$`\\\n":
+            i += 1
+            if command[i] != "\n":
+                body.append(command[i])
+        else:
+            body.append(c)
+        i += 1
+    return "".join(body), -1
+
+
+def _dup_redirect_word(command: str, i: int) -> str:
+    """The target word of a ``>&`` redirect that starts at ``i``, with its
+    quotes and backslashes removed.
+
+    bash expands that word a SECOND time after quote removal, so
+    ``echo x >&'$(sudo id)'`` runs ``sudo id`` even though the substitution is
+    single-quoted. The stripped text is roughly what that second pass sees;
+    dropping every backslash can only expose more ``$(``, never hide one.
+    """
+    n = len(command)
+    while i < n and command[i] in " \t":
+        i += 1
+    start = i
     quote: str | None = None
-    while j < n and depth:
-        c = command[j]
+    while i < n:
+        c = command[i]
         if quote == "'":
             if c == "'":
                 quote = None
-            j += 1
-            continue
-        if c == "\\" and j + 1 < n:
-            j += 2
-            continue
-        if quote == '"':
-            if c == '"':
-                quote = None
-            j += 1
-            continue
-        if c in ("'", '"'):
-            quote = c
-        elif c == "(":
-            depth += 1
-        elif c == ")":
-            depth -= 1
-        j += 1
-    return -1 if depth else j
-
-
-def _backtick_end(command: str, start: int) -> int:
-    """Index just past the backtick closing the one at ``start``, or ``-1``
-    when it never closes."""
-    j, n = start + 1, len(command)
-    while j < n:
-        if command[j] == "\\" and j + 1 < n:
-            j += 2
-            continue
-        if command[j] == "`":
-            return j + 1
-        j += 1
-    return -1
+        elif c == "\\":
+            i += 1
+        elif command.startswith("$(", i):
+            end = _find_expansion_end(command, i + 2, 1)
+            i = n if end < 0 else end - 1
+        elif c == "`":
+            i += 1
+            while i < n and command[i] != "`":
+                i += 2 if command[i] == "\\" else 1
+        elif c == '"':
+            quote = None if quote else '"'
+        elif quote is None:
+            if c == "'":
+                quote = "'"
+            elif c.isspace() or c in ";&|<>()":
+                break
+        i += 1
+    return re.sub(r"[\\'\"]", "", command[start:i])
 
 
 def _substitution_spans(
     command: str, *, literal_quotes: bool = False,
-) -> list[tuple[int, int, int, int, str]]:
+) -> list[_Span]:
     """Locate every expansion the shell evaluates, as ``(start, end, inner
-    start, inner end, kind)`` with ``kind`` in ``{"command", "arithmetic"}``.
+    start, inner end, kind, body)`` with ``kind`` in
+    ``{"command", "arithmetic"}``.
 
     This is the single source of truth for *where an expansion begins and ends*.
     Masking (:func:`_mask_nested_shell`) and extraction
@@ -1185,16 +1263,19 @@ def _substitution_spans(
     scanned independently they disagreed on quoted delimiters and a nested
     command could end up assessed by neither view (``x=$(echo ")"; sudo id)``).
 
-    Only top-level spans are returned — a substitution nested inside another is
-    reached by assessing the outer one's body recursively. Single-quoted spans
-    are skipped (the shell does not expand them), but double-quoted ones are
-    not: ``"$(sudo id)"`` still runs. An unterminated expansion extends to the
-    end of the text, so its body is still assessed (fail-closed).
+    Recognised: ``$(...)``, backticks, and unquoted process substitution
+    ``<(...)`` / ``>(...)`` — the shell runs all of them. Only top-level spans
+    are returned; a substitution nested inside another is reached by assessing
+    the outer one's body recursively. Single-quoted spans are skipped (the shell
+    does not expand them), but double-quoted ones are not: ``"$(sudo id)"``
+    still runs, and so does ``"'$(sudo id)'"`` — inside double quotes a ``'`` is
+    an ordinary character. An unterminated expansion extends to the end of the
+    text, so its body is still assessed (fail-closed).
 
     ``literal_quotes`` is for unquoted here-document bodies, where ``'`` and
     ``"`` are ordinary characters and never suppress expansion.
     """
-    spans: list[tuple[int, int, int, int, str]] = []
+    spans: list[_Span] = []
     i, n = 0, len(command)
     quote: str | None = None
     while i < n:
@@ -1216,28 +1297,33 @@ def _substitution_spans(
             quote = None
             i += 1
             continue
-        if c == "$" and i + 1 < n and command[i + 1] == "(":
+        if command.startswith("(", i + 1) and (
+            c == "$" or (c in "<>" and quote is None)
+        ):
             # ``$((`` is arithmetic: it expands a number rather than running a
             # command, so its body is not shell code (but may still contain a
             # real substitution, which the caller reaches by recursing).
-            arithmetic = i + 2 < n and command[i + 2] == "("
+            arithmetic = c == "$" and command[i + 2:i + 3] == "("
             inner_start = i + 3 if arithmetic else i + 2
             end = _find_expansion_end(command, inner_start, 2 if arithmetic else 1)
             if end < 0:
-                spans.append((i, n, inner_start, n, "command"))
+                spans.append((i, n, inner_start, n, "command", ""))
                 break
             inner_end = max(inner_start, end - (2 if arithmetic else 1))
-            spans.append(
-                (i, end, inner_start, inner_end, "arithmetic" if arithmetic else "command")
-            )
+            spans.append((
+                i, end, inner_start, inner_end,
+                "arithmetic" if arithmetic else "command", "",
+            ))
             i = end
             continue
         if c == "`":
-            end = _backtick_end(command, i)
+            # The body is DECODED (bash removes a layer of escapes before
+            # parsing it), so it is carried rather than sliced back out.
+            body, end = _backtick_body(command, i + 1)
             if end < 0:
-                spans.append((i, n, i + 1, n, "command"))
+                spans.append((i, n, i + 1, n, "command", body))
                 break
-            spans.append((i, end, i + 1, end - 1, "command"))
+            spans.append((i, end, i + 1, end - 1, "command", body))
             i = end
             continue
         i += 1
@@ -1259,7 +1345,7 @@ def _mask_nested_shell(command: str) -> str:
         return command
     out: list[str] = []
     prev = 0
-    for start, end, _inner_start, _inner_end, kind in spans:
+    for start, end, _inner_start, _inner_end, kind, _body in spans:
         out.append(command[prev:start])
         out.append(_ARITHMETIC_SENTINEL if kind == "arithmetic" else _SUBSTITUTION_SENTINEL)
         prev = end
@@ -1267,21 +1353,57 @@ def _mask_nested_shell(command: str) -> str:
     return "".join(out)
 
 
-def _extract_nested_shell(command: str, *, literal_quotes: bool = False) -> list[str]:
-    """Return shell-code strings nested in ``$(...)`` and backticks (which the
-    shell expands+executes). Single-quoted spans are skipped — the shell does
-    not expand them, so ``echo '$(rm -rf /)'`` is a harmless literal."""
+def _dup_redirect_bodies(command: str) -> list[str]:
+    """Code reachable through a ``>&`` target's second expansion.
+
+    A separate pass rather than a span: this text is not an expansion present in
+    the input but a RE-expansion of a word after quote removal, so it has no
+    extent in the original string to mask.
+    """
     out: list[str] = []
-    for _start, _end, inner_start, inner_end, kind in _substitution_spans(
+    i, n = 0, len(command)
+    quote: str | None = None
+    while i < n:
+        c = command[i]
+        if quote == "'":
+            if c == "'":
+                quote = None
+            i += 1
+            continue
+        if c == "\\" and i + 1 < n:
+            i += 2
+            continue
+        if c == "'" and quote is None:
+            quote = "'"
+        elif c == '"':
+            quote = None if quote else '"'
+        elif c == ">" and quote is None and command.startswith("&", i + 1):
+            word = _dup_redirect_word(command, i + 2)
+            if word != command:
+                out.extend(_extract_nested_shell(word))
+        i += 1
+    return out
+
+
+def _extract_nested_shell(command: str, *, literal_quotes: bool = False) -> list[str]:
+    """Return shell-code strings nested in ``$(...)``, backticks and unquoted
+    process substitution (which the shell expands+executes). Single-quoted
+    spans are skipped — the shell does not expand them, so
+    ``echo '$(rm -rf /)'`` is a harmless literal. The one exception is the
+    target of ``>&``, which bash expands twice (see
+    :func:`_dup_redirect_word`)."""
+    out: list[str] = []
+    for _start, _end, inner_start, inner_end, kind, body in _substitution_spans(
         command, literal_quotes=literal_quotes,
     ):
-        inner = command[inner_start:inner_end]
+        inner = body or command[inner_start:inner_end]
         if kind == "arithmetic":
             # The arithmetic body is not shell code, but ``$(( $(id) + 1 ))``
             # still runs ``id``.
             out.extend(_extract_nested_shell(inner))
         elif inner:
             out.append(inner)
+    out.extend(_dup_redirect_bodies(command))
     return out
 
 

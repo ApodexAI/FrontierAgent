@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -189,6 +190,10 @@ class TerminalSession(TaskRunnerMixin):
         # plugins.tools._path_auth._authorized_local_path). Without this they
         # only allow a few default dirs and deny the user's repo.
         self._authorize_workspace(cwd)
+        # _persist() now runs both on the main thread (start_new_session,
+        # rename_session) and off-thread (_on_turn's asyncio.to_thread), so
+        # concurrent writers must serialize on the same checkpoint file.
+        self._persist_lock = threading.Lock()
 
     @staticmethod
     def _active_spill_workspace() -> Path | None:
@@ -476,7 +481,11 @@ class TerminalSession(TaskRunnerMixin):
         after each completed turn — keep history current and persist."""
         self.history = list(messages)
         self.display_history = list(messages)
-        self._persist()
+        # _persist() does synchronous file I/O over the full history; run it
+        # off the event loop so long sessions don't stall on every turn.
+        # Awaited between turns; _persist_lock also serializes snapshots and
+        # writes if cancellation leaves this worker running in the background.
+        await asyncio.to_thread(self._persist)
 
     # ── persistence (interrupt-safe resume) ───────────────────────────────
     def _enrich_task(self, task: str) -> str:
@@ -591,21 +600,29 @@ class TerminalSession(TaskRunnerMixin):
 
     def _persist(self) -> None:
         """Checkpoint session state so ``--resume <id>`` can continue it.
-        Best-effort; a failed write never disrupts the session."""
+        Best-effort; a failed write never disrupts the session.
+
+        Serialized via ``_persist_lock`` and written atomically (tmp file +
+        ``os.replace``) because this runs from both the main thread
+        (``start_new_session`` / ``rename_session``) and a worker thread
+        (``_on_turn``'s ``asyncio.to_thread``) — without both, concurrent
+        writers can interleave and corrupt the checkpoint file."""
         try:
             import json
 
             from apodex.todo import get_todos
 
-            snapshot = getattr(self.r, "snapshot_state", None)
-            if callable(snapshot):
-                raw_tui_state = snapshot()
-                self.tui_state = raw_tui_state if isinstance(raw_tui_state, dict) else {}
+            # Snapshot under the same lock as the write: a cancelled
+            # to_thread worker can otherwise overwrite a newer checkpoint
+            # with a payload it captured before waiting for this lock.
+            with self._persist_lock:
+                snapshot = getattr(self.r, "snapshot_state", None)
+                if callable(snapshot):
+                    raw_tui_state = snapshot()
+                    self.tui_state = raw_tui_state if isinstance(raw_tui_state, dict) else {}
 
-            path = _session_state_path(self.session_id)
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump({
+                path = _session_state_path(self.session_id)
+                payload = {
                     "session_id": self.session_id,
                     "created_at": self.created_at,
                     "local_timezone": self.local_timezone,
@@ -633,7 +650,12 @@ class TerminalSession(TaskRunnerMixin):
                         {"content": item.content, "status": item.status}
                         for item in get_todos()
                     ],
-                }, f, ensure_ascii=False)
+                }
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                tmp_path = f"{path}.{os.getpid()}.{threading.get_ident()}.tmp"
+                with open(tmp_path, "w", encoding="utf-8") as f:
+                    json.dump(payload, f, ensure_ascii=False)
+                os.replace(tmp_path, path)
         except Exception:
             pass
 

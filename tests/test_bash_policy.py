@@ -527,3 +527,70 @@ def test_env_split_dynamic_executable_is_denied(command: str, mode: str) -> None
 ])
 def test_env_split_only_checks_the_command_it_runs(command: str) -> None:
     assert assess_bash_command(command, mode="off").level == "allow"
+
+
+# ── merged with main's substitution scanner (#42): all three gaps it closed ──
+# Each of these was `allow` in `off` mode on this branch before the merge, and
+# the capability that catches it comes from main's implementation.
+
+
+@pytest.mark.parametrize("mode", MODES)
+@pytest.mark.parametrize(("command", "group"), [
+    # bash expands a ``>&`` target a second time after quote removal.
+    ("echo x >&'$(sudo id)'", "priv_esc"),
+    ('echo x >&"$(ssh h id)"', "exfil"),
+    ("echo x >& $(pkill -f x)", "process_kill"),
+    # Escapes inside backticks are removed before the body is parsed.
+    ("echo `echo \\`sudo id\\``", "priv_esc"),
+    ("echo `\\$(sudo id)`", "priv_esc"),
+    # Each nested level keeps its own quote state.
+    ('$(echo "$(echo ")\'")" $(sudo id))', "priv_esc"),
+    ('x=$(echo "$(echo ")")" ; ssh h id)', "exfil"),
+    # Process substitution runs its body.
+    ("diff <(sudo id) /dev/null", "priv_esc"),
+    ("echo x > >(sudo id)", "priv_esc"),
+    ("cat <(ssh h 'cat ~/.aws/credentials')", "exfil"),
+])
+def test_main_scanner_capabilities_reach_the_group_check(
+    command: str, group: str, mode: str,
+) -> None:
+    result = assess_bash_command(command, mode=mode)
+    assert result.level == "deny"
+    assert result.group == group
+
+
+@pytest.mark.parametrize("mode", MODES)
+@pytest.mark.parametrize("command", [
+    "echo x >&'$(halt)'",
+    "echo `echo \\`halt\\``",
+    "diff <(halt) /dev/null",
+])
+def test_main_scanner_capabilities_reach_the_word_screens(command: str, mode: str) -> None:
+    assert assess_bash_command(command, mode=mode).reason == (
+        "Refuses host shutdown/reboot commands."
+    )
+
+
+@pytest.mark.parametrize("command", [
+    # A substitution in single quotes is NOT expanded (outside a >& target).
+    "echo '$(sudo id)'",
+    # ``>&`` duplicating a file descriptor is not a word to re-expand.
+    "python3 x.py 2>&1",
+    "echo x >&2",
+    # Benign process substitution and backticks.
+    'diff <(sort a.txt) <(sort b.txt)',
+    "echo `date`",
+    "echo $(command -v python3)",
+])
+def test_the_merged_scanner_keeps_benign_expansions_allowed(command: str) -> None:
+    assert assess_bash_command(command, mode="off").level == "allow"
+
+
+def test_escapes_inside_backticks_are_decoded_once() -> None:
+    assert policy._extract_nested_shell("echo `echo \\`id\\``") == ["echo `id`"]
+    # A backslash before anything else is retained, as bash does.
+    assert policy._extract_nested_shell("echo `grep \\d x`") == ["grep \\d x"]
+
+
+def test_an_unterminated_backtick_still_assesses_its_body() -> None:
+    assert assess_bash_command("echo `sudo id", mode="off").level == "deny"

@@ -748,6 +748,89 @@ def test_session_persist_and_resume(tmp_path, monkeypatch):
     assert "edited.py" in s2.journal.to_dict() or True  # journal restored shape
 
 
+
+@pytest.mark.asyncio
+async def test_cancelled_checkpoint_cannot_overwrite_newer_save(tmp_path, monkeypatch):
+    import threading
+    from types import SimpleNamespace
+
+    from apodex import session as session_module
+    from apodex.session import TerminalSession
+
+    checkpoint = tmp_path / "state.json"
+    monkeypatch.setattr(session_module, "_session_state_path", lambda _: str(checkpoint))
+    snapshot_started = threading.Event()
+    release_snapshot = threading.Event()
+    old_save_finished = threading.Event()
+    old_thread_id = None
+
+    class CheckpointLock:
+        def __init__(self):
+            self.lock = threading.Lock()
+
+        def __enter__(self):
+            # Let the old snapshot finish once a newer save is waiting for
+            # its lock. Before the fix the old snapshot owns no lock, so the
+            # newer save completes first and releases it in the test below.
+            if threading.get_ident() != old_thread_id and self.lock.locked():
+                release_snapshot.set()
+            self.lock.acquire()
+
+        def __exit__(self, *_):
+            self.lock.release()
+
+    def journal_snapshot():
+        if threading.get_ident() == old_thread_id:
+            snapshot_started.set()
+            if not release_snapshot.wait(5):
+                raise TimeoutError("old checkpoint was never released")
+        return {}
+
+    session = TerminalSession.__new__(TerminalSession)
+    session.__dict__.update(
+        r=SimpleNamespace(), session_id="test", created_at="", local_timezone="",
+        session_name="old name", mode="coding", cwd=str(tmp_path),
+        cfg=SimpleNamespace(model="fake"), history=[], display_history=[],
+        workflow_turns=[], usage=SimpleNamespace(to_dict=lambda: {}), tui_state={},
+        journal=SimpleNamespace(to_dict=journal_snapshot,
+                                observed_paths=lambda: [], revert_bases=lambda: {}),
+        plan_state=SimpleNamespace(active=False), _persist_lock=CheckpointLock(),
+    )
+    persist = session._persist
+
+    def tracked_persist():
+        nonlocal old_thread_id
+        is_old = old_thread_id is None
+        if is_old:
+            old_thread_id = threading.get_ident()
+        try:
+            persist()
+        finally:
+            if is_old:
+                old_save_finished.set()
+
+    monkeypatch.setattr(session, "_persist", tracked_persist)
+    turn = asyncio.create_task(session._on_turn(1, [{"role": "user", "content": "old"}], {}))
+    try:
+        assert await asyncio.to_thread(snapshot_started.wait, 5)
+        turn.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await turn
+        session.history = [{"role": "user", "content": "new"}]
+        session.display_history = list(session.history)
+        await asyncio.to_thread(session.rename_session, "new name")
+    finally:
+        release_snapshot.set()
+        assert await asyncio.to_thread(old_save_finished.wait, 5)
+        if not turn.done():
+            await turn
+
+    state = json.loads(checkpoint.read_text())
+    assert state["name"] == "new name"
+    assert state["history"] == session.history
+    assert state["display_history"] == session.display_history
+
+
 def test_follow_up_receives_exact_agent_and_host_deliverable_paths(tmp_path, monkeypatch):
     from apodex.config import ModelConfig
     from apodex.render import Renderer

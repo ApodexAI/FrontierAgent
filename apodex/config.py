@@ -222,7 +222,18 @@ def inspect_runtime_config(
         mode=active_mode,
         env=env,
     )
-    if "web_search" in tool_names and not _configured(env.get("SERPER_API_KEY")):
+    search_provider = (env.get("WEB_SEARCH_PROVIDER") or "serper").strip().lower()
+    if "web_search" in tool_names and search_provider not in {"serper", "parallel"}:
+        issues.append(RuntimeConfigIssue(
+            code="invalid_web_search_provider",
+            message="WEB_SEARCH_PROVIDER must be set to 'serper' or 'parallel'.",
+            env_var="WEB_SEARCH_PROVIDER",
+        ))
+    if (
+        "web_search" in tool_names
+        and search_provider == "serper"
+        and not _configured(env.get("SERPER_API_KEY"))
+    ):
         issues.append(RuntimeConfigIssue(
             code="missing_serper_api_key",
             message=(
