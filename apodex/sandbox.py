@@ -41,9 +41,11 @@ files configure the boundary with that variable.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 import shlex
+import signal
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -253,13 +255,81 @@ async def run_shell(
             getattr(result, "stderr", "") or "",
         )
 
+    if sys.platform.startswith("linux"):
+        return await _run_supervised_shell(command, cwd, timeout)
+    return await _run_group_shell(command, cwd, timeout)
+
+
+async def _run_supervised_shell(
+    command: str, cwd: str, timeout: int,
+) -> tuple[int, str, str]:
+    """Run under a Linux child subreaper, including escaped descendants."""
+    control_read, control_write = os.pipe()
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable, "-m", "apodex._shell_supervisor",
+            str(control_read), command,
+            cwd=cwd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            pass_fds=(control_read,),
+            start_new_session=True,
+        )
+    except BaseException:
+        os.close(control_write)
+        raise
+    finally:
+        os.close(control_read)
+
+    async def collect() -> tuple[bytes, bytes]:
+        assert proc.stdout is not None and proc.stderr is not None
+        out, err = await asyncio.gather(proc.stdout.read(), proc.stderr.read())
+        with contextlib.suppress(OSError):
+            os.write(control_write, b"S")
+        await proc.wait()
+        return out, err
+
+    try:
+        try:
+            out, err = await asyncio.wait_for(collect(), timeout=timeout)
+        except BaseException:
+            # The supervisor kills its shell group, then every adopted child.
+            # Closing the pipe is another kill instruction if the write fails.
+            with contextlib.suppress(OSError):
+                os.write(control_write, b"K")
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(proc.communicate(), timeout=5)
+            raise
+        return (
+            proc.returncode or 0,
+            out.decode("utf-8", "replace"),
+            err.decode("utf-8", "replace"),
+        )
+    finally:
+        os.close(control_write)
+
+
+async def _run_group_shell(
+    command: str, cwd: str, timeout: int,
+) -> tuple[int, str, str]:
+    """Use process-group cleanup on platforms without Linux subreapers."""
     proc = await asyncio.create_subprocess_shell(
         command,
         cwd=cwd,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        start_new_session=True,
     )
-    out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+    completed = False
+    try:
+        out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        completed = True
+    finally:
+        if not completed:
+            with contextlib.suppress(OSError):
+                os.killpg(proc.pid, signal.SIGKILL)
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(proc.wait(), timeout=5)
     return (
         proc.returncode or 0,
         out.decode("utf-8", "replace"),

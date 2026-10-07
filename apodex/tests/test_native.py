@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import os
+import shlex
+import sys
 from pathlib import Path
+
+import pytest
 
 from apodex import cli, docker, sandbox
 from apodex.native import prepare_native_runtime
@@ -131,6 +135,67 @@ def test_native_strategy_is_explicitly_not_os_isolated() -> None:
 
     assert not strategy.isolated
     assert "not an OS sandbox" in strategy.describe()
+
+
+@pytest.mark.parametrize("command", [
+    "(sleep 2; touch marker) & wait",
+    "(sleep 2; touch marker) & exit 0",
+])
+@pytest.mark.parametrize("interruption", ["timeout", "cancellation"])
+async def test_run_shell_reaps_background_children(
+    tmp_path, command, interruption,
+) -> None:
+    strategy = Strategy(NATIVE, "test")
+    if interruption == "timeout":
+        with pytest.raises(TimeoutError):
+            await sandbox.run_shell(command, str(tmp_path), 1, strategy)
+    else:
+        task = asyncio.create_task(sandbox.run_shell(
+            command, str(tmp_path), 10, strategy,
+        ))
+        await asyncio.sleep(1)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    await asyncio.sleep(2)
+    assert not (tmp_path / "marker").exists()
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux subreaper")
+@pytest.mark.parametrize("shell_exits", [False, True])
+@pytest.mark.parametrize("interruption", ["timeout", "cancellation"])
+async def test_run_shell_reaps_descendants_that_create_new_sessions(
+    tmp_path, shell_exits, interruption,
+) -> None:
+    child = (
+        "import os,time; os.setsid(); open('started','w').close(); "
+        "time.sleep(2.5); open('marker','w').close()"
+    )
+    command = f"{shlex.quote(sys.executable)} -c {shlex.quote(child)} & "
+    command += "exit 0" if shell_exits else "wait"
+    strategy = Strategy(NATIVE, "test")
+    if interruption == "timeout":
+        with pytest.raises(TimeoutError):
+            await sandbox.run_shell(command, str(tmp_path), 1, strategy)
+    else:
+        task = asyncio.create_task(sandbox.run_shell(
+            command, str(tmp_path), 10, strategy,
+        ))
+        await asyncio.sleep(1)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    assert (tmp_path / "started").exists()
+    await asyncio.sleep(2)
+    assert not (tmp_path / "marker").exists()
+
+
+async def test_run_shell_preserves_output_and_exit_code(tmp_path) -> None:
+    result = await sandbox.run_shell(
+        "printf out; printf err >&2; exit 3", str(tmp_path), 5,
+        Strategy(NATIVE, "test"),
+    )
+    assert result == (3, "out", "err")
 
 
 def test_nonroot_native_current_sandbox_skips_tool_user_warning(
