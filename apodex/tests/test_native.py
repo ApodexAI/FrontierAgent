@@ -198,6 +198,13 @@ async def test_run_shell_preserves_output_and_exit_code(tmp_path) -> None:
     assert result == (3, "out", "err")
 
 
+async def test_run_shell_preserves_signal_exit_code(tmp_path) -> None:
+    result = await sandbox.run_shell(
+        "kill -TERM $$", str(tmp_path), 5, Strategy(NATIVE, "test"),
+    )
+    assert result[0] == -15
+
+
 def test_nonroot_native_current_sandbox_skips_tool_user_warning(
     tmp_path, monkeypatch, caplog,
 ) -> None:

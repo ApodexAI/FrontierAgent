@@ -82,6 +82,11 @@ def main(control_fd: int, command: str) -> int:
             exited = _reap()
             if shell_pid in exited:
                 shell_status = exited[shell_pid]
+                try:
+                    os.write(control_fd, f"{shell_status}\n".encode("ascii"))
+                except OSError:
+                    _kill_descendants(shell_pid)
+                    return 124
             if success_requested and shell_status is not None:
                 return shell_status
             ready, _, _ = select.select([control_fd], [], [], 0.02)

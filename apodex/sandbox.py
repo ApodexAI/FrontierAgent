@@ -46,6 +46,7 @@ import logging
 import os
 import shlex
 import signal
+import socket
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -264,49 +265,56 @@ async def _run_supervised_shell(
     command: str, cwd: str, timeout: int,
 ) -> tuple[int, str, str]:
     """Run under a Linux child subreaper, including escaped descendants."""
-    control_read, control_write = os.pipe()
+    parent_control, child_control = socket.socketpair()
     try:
         proc = await asyncio.create_subprocess_exec(
             sys.executable, "-m", "apodex._shell_supervisor",
-            str(control_read), command,
+            str(child_control.fileno()), command,
             cwd=cwd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            pass_fds=(control_read,),
+            pass_fds=(child_control.fileno(),),
             start_new_session=True,
         )
     except BaseException:
-        os.close(control_write)
+        parent_control.close()
         raise
     finally:
-        os.close(control_read)
+        child_control.close()
 
-    async def collect() -> tuple[bytes, bytes]:
+    parent_control.setblocking(False)
+
+    async def collect() -> tuple[bytes, bytes, bytes]:
         assert proc.stdout is not None and proc.stderr is not None
-        out, err = await asyncio.gather(proc.stdout.read(), proc.stderr.read())
-        with contextlib.suppress(OSError):
-            os.write(control_write, b"S")
-        await proc.wait()
-        return out, err
+        loop = asyncio.get_running_loop()
+        out, err, status = await asyncio.gather(
+            proc.stdout.read(), proc.stderr.read(),
+            loop.sock_recv(parent_control, 32),
+        )
+        return out, err, status
 
     try:
         try:
-            out, err = await asyncio.wait_for(collect(), timeout=timeout)
+            out, err, status = await asyncio.wait_for(collect(), timeout=timeout)
         except BaseException:
             # The supervisor kills its shell group, then every adopted child.
-            # Closing the pipe is another kill instruction if the write fails.
+            # Closing the socket is another kill instruction if the write fails.
             with contextlib.suppress(OSError):
-                os.write(control_write, b"K")
+                parent_control.send(b"K")
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(proc.communicate(), timeout=5)
             raise
+        if status:
+            with contextlib.suppress(OSError):
+                parent_control.send(b"S")
+        await asyncio.wait_for(proc.wait(), timeout=5)
         return (
-            proc.returncode or 0,
+            int(status) if status else (proc.returncode or 0),
             out.decode("utf-8", "replace"),
             err.decode("utf-8", "replace"),
         )
     finally:
-        os.close(control_write)
+        parent_control.close()
 
 
 async def _run_group_shell(
