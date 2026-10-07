@@ -841,15 +841,20 @@ _BWRAP_PATH = shutil.which("bwrap")
 _BWRAP_USABLE: bool | None = None
 
 
-def bwrap_available() -> bool:
-    """True on Linux when ``bwrap`` is present and usable."""
-    global _BWRAP_USABLE
+def bwrap_probe() -> tuple[bool, str]:
+    """``(usable, why_not)`` for bubblewrap on this host, uncached.
+
+    Public so a test can report WHY the jail is unavailable instead of
+    re-probing with its own arguments. A hand-written probe is a trap here:
+    ``bwrap --ro-bind / / true`` fails on a perfectly working host, because
+    without ``--unshare-user`` bwrap needs to be setuid and the packaged binary
+    is not. Only the argument set the sandbox actually runs answers the
+    question the caller is asking.
+    """
     if not sys.platform.startswith("linux"):
-        return False
+        return False, f"not Linux (platform={sys.platform})"
     if _BWRAP_PATH is None:
-        return False
-    if _BWRAP_USABLE is not None:
-        return _BWRAP_USABLE
+        return False, "no bwrap binary on PATH"
     try:
         result = subprocess.run(
             [_BWRAP_PATH, *_bwrap_base_args(), "--", "true"],
@@ -857,12 +862,22 @@ def bwrap_available() -> bool:
             text=True,
             timeout=5,
         )
-        _BWRAP_USABLE = result.returncode == 0
-        if not _BWRAP_USABLE:
-            logger.warning("bubblewrap probe failed: %s", result.stderr.strip())
     except Exception as exc:
-        logger.warning("bubblewrap probe failed: %s", exc)
-        _BWRAP_USABLE = False
+        return False, f"probe raised {type(exc).__name__}: {exc}"
+    if result.returncode == 0:
+        return True, ""
+    return False, result.stderr.strip() or f"probe exit {result.returncode}"
+
+
+def bwrap_available() -> bool:
+    """True on Linux when ``bwrap`` is present and usable."""
+    global _BWRAP_USABLE
+    if _BWRAP_USABLE is not None:
+        return _BWRAP_USABLE
+    usable, why_not = bwrap_probe()
+    _BWRAP_USABLE = usable
+    if not usable and _BWRAP_PATH is not None and sys.platform.startswith("linux"):
+        logger.warning("bubblewrap probe failed: %s", why_not)
     return _BWRAP_USABLE
 
 
