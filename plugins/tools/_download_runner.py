@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import email.message
+import email.utils
 import fcntl
 import hashlib
 import http.client
@@ -55,10 +56,6 @@ _ALLOWED_CONTENT_TYPES = (
     "application/zip",
     "image/",
     "text/",
-)
-_CONTENT_DISPOSITION_NAME_RE = re.compile(
-    r"""filename\*?=(?:UTF-8''|["']?)([^;"']+)""",
-    re.IGNORECASE,
 )
 
 
@@ -270,11 +267,17 @@ def _preflight(
 
 
 def _header_filename(headers: email.message.Message) -> str:
-    disposition = headers.get("Content-Disposition") or ""
-    match = _CONTENT_DISPOSITION_NAME_RE.search(disposition)
-    if not match:
-        return ""
-    return urllib.parse.unquote(match.group(1)).strip()
+    fallback = ""
+    for name, value in headers.get_params(header="content-disposition", failobj=[]):
+        if name != "filename":
+            continue
+        # The parser represents filename* as an RFC 2231 tuple. Prefer it
+        # over the ordinary filename, regardless of parameter order.
+        if isinstance(value, tuple):
+            return email.utils.collapse_rfc2231_value(value).strip()
+        if not fallback:
+            fallback = value.strip()
+    return fallback
 
 
 def _safe_filename(candidate: str) -> str:
