@@ -757,6 +757,8 @@ def _argv_hard_deny(commands: list[list[str]]) -> str | None:
     """Robust dangerous-op detection on parsed argvs. Complements the raw
     regex — order-, flag-combination-, prefix- and quote-independent.
     """
+    if any(_EXPANSION_SCREEN_FAILURE in argv for argv in commands):
+        return "Cannot safely inspect shell code past the nesting limit; simplify the command."
     cd_into_protected = False
     for raw_argv in commands:
         argv = strip_command_prefixes(raw_argv)
@@ -2546,6 +2548,66 @@ def _argv_group_deny(commands: list[list[str]]) -> tuple[str, str] | None:
     return None
 
 
+#: Expansion punctuation, blanked before the bounded fallback screen.
+_EXPANSION_PUNCT_RE = re.compile(r"\$\(\(|\$\(|<\(|>\(|[`()]")
+_EXPANSION_SCREEN_FAILURE = "__FA_EXPANSION_SCREEN_FAILURE__"
+_MAX_SCREEN_PASSES = 8
+_RESIDUAL_SHELL_SYNTAX_RE = re.compile(r"[\s;|&'\"\\`()]|\$'")
+
+
+def _expansion_commands(bodies: list[str]) -> list[list[str]]:
+    """Conservatively screen code past the parser's nesting limit.
+
+    Flatten expansion punctuation once per pass, split shell separators, and
+    retain both complete argvs (for argument-sensitive hard denials) and each
+    word as a candidate executable. Quoted code is decoded by tokenization;
+    words still containing shell syntax are screened again, without recursion.
+    This intentionally treats code-looking data as code at excessive depth.
+
+    Both the pass count and total input scanned are bounded. If quoting cannot
+    be resolved within that budget, or tokenization fails, record a hard denial
+    rather than dropping the remaining code. A plain substitution chain of any
+    depth needs just one pass, so its cost stays linear in the input size.
+    """
+    commands: list[list[str]] = []
+    candidates: list[list[str]] = []
+    pending = bodies
+    remaining = max(1_024, _MAX_SCREEN_PASSES * sum(map(len, bodies)))
+    for _ in range(_MAX_SCREEN_PASSES):
+        next_pass: list[str] = []
+        for body in pending:
+            remaining -= len(body)
+            if remaining < 0:
+                return [*commands, *candidates, [_EXPANSION_SCREEN_FAILURE]]
+            flat = _EXPANSION_PUNCT_RE.sub(" ", _normalize_ansi_c_quotes(body))
+            for segment in _split_top_level(flat):
+                try:
+                    words = tokenize_shell_segment(segment)
+                except ValueError:
+                    return [*commands, *candidates, [_EXPANSION_SCREEN_FAILURE]]
+                if not words:
+                    continue
+                keyword = _leading_shell_keyword(segment)
+                if keyword in _CONTROL_LEADERS and words[0] == keyword:
+                    words[0] = _SHELL_SYNTAX_TOKEN
+                commands.append(words)
+                commands.extend(_find_exec_payloads(strip_command_prefixes(words)))
+                candidates.extend([word] for word in words if word.strip())
+                for word in words:
+                    # Encoded redirection syntax is already checked in the
+                    # complete argv; feeding its sentinel back to shlex would
+                    # turn an ordinary redirect into a parse failure.
+                    if redirection_token(word) is None and _RESIDUAL_SHELL_SYNTAX_RE.search(word):
+                        next_pass.append(word)
+        if not next_pass:
+            # Keep complete commands in execution order. Interspersing a
+            # singleton `cd` would reset the protected-directory state before
+            # a following relative deletion could be checked.
+            return [*commands, *candidates]
+        pending = next_pass
+    return [*commands, *candidates, [_EXPANSION_SCREEN_FAILURE]]
+
+
 def _parse_commands(command: str, depth: int = 0) -> list[list[str]]:
     """Parse into a list of argv lists (one per simple command), recursively
     including commands nested in ``$(...)`` / backticks, in the code argument of
@@ -2581,9 +2643,6 @@ def _parse_commands(command: str, depth: int = 0) -> list[list[str]]:
     for argv in list(argvs):
         argvs.extend(_find_exec_payloads(argv))
 
-    if depth >= _MAX_NEST:
-        return argvs
-
     nested = _extract_nested_shell(stripped) + list(heredoc_bodies)
     for raw_argv in list(argvs):
         # ``_shell_code_args`` unwraps prefixes first, so ``env bash -c …`` /
@@ -2596,6 +2655,13 @@ def _parse_commands(command: str, depth: int = 0) -> list[list[str]]:
         # (Layer 1.5) and the allowlist never saw ``watch 'sudo id'``.
         nested.extend(_evaluator_payloads(raw_argv)[0])
         nested.extend(_env_split_payloads(raw_argv))
+    if depth >= _MAX_NEST:
+        # Deep code is screened without further parser recursion. The fallback
+        # must retain separators, quoted payloads and argument-sensitive rules;
+        # anything it cannot inspect within bounded work fails closed.
+        argvs.extend(_expansion_commands(nested))
+        return argvs
+
     for sub in nested:
         if sub.strip():
             # Unparseable nested code — the outer parse already recorded it.

@@ -596,3 +596,226 @@ def test_escapes_inside_backticks_are_decoded_once() -> None:
 
 def test_an_unterminated_backtick_still_assesses_its_body() -> None:
     assert assess_bash_command("echo `sudo id", mode="off").level == "deny"
+
+
+# ── nesting past the recursion limit fails closed (Harness #632) ─────────
+#
+# ``_parse_commands`` stops recursing at ``_MAX_NEST``, and stopped SILENTLY:
+# the levels below were assessed by nobody, so a group denial that is supposed
+# to bind in every mode could be walked around with enough parentheses.
+# Measured in ``off`` mode before the fix, against a limit of 4:
+#     $($($($($($(sudo id))))))  -> allow
+# ``enforce`` denied it, but only because the masked sentinel left in
+# executable position is not on the allowlist — incidental, not the rule that
+# should have applied.
+
+
+def _nest(body: str, depth: int) -> str:
+    return "$(" * depth + body + ")" * depth
+
+
+@pytest.mark.parametrize("mode", MODES)
+@pytest.mark.parametrize("depth", [1, 3, 4, 5, 6, 8, 12, 40])
+@pytest.mark.parametrize(("body", "group"), [
+    ("sudo id", "priv_esc"),
+    ("ssh h 'cat ~/.aws/credentials'", "exfil"),
+    ("pkill -f python3", "process_kill"),
+])
+def test_group_denials_survive_any_nesting_depth(
+    body: str, group: str, depth: int, mode: str,
+) -> None:
+    result = assess_bash_command(_nest(body, depth), mode=mode)
+    assert result.level == "deny"
+    # Past the limit the whole leftover text is screened as one unit, so the
+    # group is still named rather than the denial coming from somewhere else.
+    assert result.group == group
+
+
+@pytest.mark.parametrize("mode", MODES)
+@pytest.mark.parametrize("depth", [5, 9, 20])
+@pytest.mark.parametrize("body", ["halt", "mkfs.ext4 /dev/sda", "reboot"])
+def test_word_screens_survive_any_nesting_depth(
+    body: str, depth: int, mode: str,
+) -> None:
+    assert assess_bash_command(_nest(body, depth), mode=mode).level == "deny"
+
+
+@pytest.mark.parametrize("mode", MODES)
+@pytest.mark.parametrize("wrapper", [
+    "bash <<'EOF'\n{code}\nEOF",
+    "bash -c '{code}'",
+    "watch -n 1 '{code}'",
+    "env -S '{code}'",
+])
+def test_depth_is_not_reset_by_another_nesting_channel(wrapper: str, mode: str) -> None:
+    # Heredocs, shell -c payloads and evaluator payloads all recurse through
+    # the same counter, so stacking them cannot buy extra depth.
+    command = wrapper.format(code=_nest("sudo id", 8))
+    assert assess_bash_command(command, mode=mode).level == "deny"
+
+
+@pytest.mark.parametrize("depth", [1, 4, 6, 10, 30])
+def test_benign_nesting_is_unaffected(depth: int) -> None:
+    # The leftover screen can only ADD refusals, so a deep but harmless chain
+    # must read exactly as it did before.
+    assert assess_bash_command(_nest("date", depth), mode="off").level == "allow"
+
+
+@pytest.mark.parametrize("command", [
+    "echo $(echo $(echo $(echo $(echo $(date)))))",
+    "v=$(python3 -V); echo $v",
+    "echo $(( $(echo 1) + 1 ))",
+    "for f in $(ls $(pwd)); do echo $f; done",
+    "echo $(command -v $(echo python3))",
+    "diff <(sort $(echo a)) <(sort b)",
+])
+def test_deeply_nested_benign_commands_stay_allowed(command: str) -> None:
+    assert assess_bash_command(command, mode="off").level == "allow"
+
+
+@pytest.mark.parametrize("depth", [200, 2_000, 20_000])
+def test_pathological_depth_is_bounded_work_not_a_crash(depth: int) -> None:
+    """Three failure modes this has to avoid at once: losing the payload,
+    raising ``RecursionError`` instead of returning a verdict, and taking so
+    long that the assessment itself is the denial of service.
+
+    An earlier attempt peeled the chain one layer at a time, which cost a scan
+    per layer: 11s at depth 5,000, and it lost the payload again once it hit
+    its step bound. The word screen is one pass.
+    """
+    import time
+
+    command = _nest("sudo id", depth)
+    started = time.perf_counter()
+    result = assess_bash_command(command, mode="off")
+    elapsed = time.perf_counter() - started
+
+    assert result.level == "deny"
+    assert result.group == "priv_esc"
+    # Generous enough not to be flaky on a loaded machine, tight enough to
+    # catch a return to per-layer scanning (which was ~60x this at 20k).
+    assert elapsed < 5.0, f"depth {depth} took {elapsed:.1f}s"
+
+
+def test_an_unterminated_deep_chain_still_fails_closed() -> None:
+    # The span scanner treats an unterminated ``$(`` as running to end-of-text.
+    assert assess_bash_command("$(" * 200 + "sudo id", mode="off").level == "deny"
+
+
+def test_the_word_screen_is_conservative_past_the_limit() -> None:
+    """Past ``_MAX_NEST`` the screen cannot tell a command name from a word
+    that looks like one, so a denied name appearing as DATA is refused. Worth
+    pinning as deliberate: it only applies at a depth no real command reaches,
+    and the alternative is not assessing those levels at all."""
+    quoted_data = _nest("echo ssh", 8)
+    assert assess_bash_command(quoted_data, mode="off").level == "deny"
+    # Below the limit the same text is read properly and allowed.
+    assert assess_bash_command(_nest("echo ssh", 2), mode="off").level == "allow"
+
+
+@pytest.mark.parametrize("mode", MODES)
+@pytest.mark.parametrize("depth", [4, 5, 6, 12, 40])
+@pytest.mark.parametrize(("body", "group"), [
+    ("date;sudo id", "priv_esc"),
+    ("date|ssh h id", "exfil"),
+    ("date&&pkill -f x", "process_kill"),
+    ("date||sudo id", "priv_esc"),
+    ("date&sudo id", "priv_esc"),
+    ("date\nsudo id", "priv_esc"),
+])
+def test_deep_screen_splits_shell_command_separators(
+    body: str, group: str, depth: int, mode: str,
+) -> None:
+    result = assess_bash_command(_nest(body, depth), mode=mode)
+    assert result.level == "deny"
+    assert result.group == group
+
+
+@pytest.mark.parametrize("mode", MODES)
+@pytest.mark.parametrize("depth", [4, 5, 8, 40])
+@pytest.mark.parametrize(("body", "group"), [
+    ("bash -c 'sudo id'", "priv_esc"),
+    ('bash -c "ssh h id"', "exfil"),
+    ("watch 'pkill -f x'", "process_kill"),
+    ("env -S 'sudo id'", "priv_esc"),
+    ("bash -c 'date;sudo id'", "priv_esc"),
+    ('bash -c "su\\\"do\\\" id"', "priv_esc"),
+    (r"bash -c $'\x73udo id'", "priv_esc"),
+    (r"bash -c 's\udo id'", "priv_esc"),
+])
+def test_deep_screen_decodes_quoted_and_escaped_code(
+    body: str, group: str, depth: int, mode: str,
+) -> None:
+    result = assess_bash_command(_nest(body, depth), mode=mode)
+    assert result.level == "deny"
+    assert result.group == group
+
+
+@pytest.mark.parametrize("mode", MODES)
+@pytest.mark.parametrize("body", [
+    "rm -rf /etc",
+    "env rm -rf /etc",
+    "chmod -R 777 /etc",
+    "chown -R root /etc",
+    "find /etc -delete",
+    "date;rm -rf /etc",
+    "bash -c 'rm -rf /etc'",
+    "bash -c 'cd /etc; rm -rf .'",
+    "if rm -rf /etc; then date; fi",
+    "find /tmp -exec rm -rf /etc \\;",
+])
+def test_deep_screen_preserves_argument_sensitive_hard_denials(body: str, mode: str) -> None:
+    result = assess_bash_command(_nest(body, 8), mode=mode, interactive=True)
+    assert result.level == "deny"
+    assert not result.group
+
+
+@pytest.mark.parametrize("mode", MODES)
+@pytest.mark.parametrize("body", ["date;sudo id", "bash -c 'sudo id'"])
+def test_deep_group_denials_still_require_human_confirmation(body: str, mode: str) -> None:
+    result = assess_bash_command(_nest(body, 8), mode=mode, interactive=True)
+    assert result.level == "confirm"
+    assert result.group == "priv_esc"
+
+
+@pytest.mark.parametrize("mode", MODES)
+@pytest.mark.parametrize("interactive", [False, True])
+def test_excessive_quoting_fails_closed_with_bounded_work(mode: str, interactive: bool) -> None:
+    import shlex
+    import time
+
+    body = "sudo id"
+    for _ in range(9):
+        body = shlex.quote(body)
+    started = time.perf_counter()
+    result = assess_bash_command(_nest("eval " + body, 6), mode=mode, interactive=interactive)
+    assert result.level == "deny"
+    assert "nesting limit" in result.reason
+    assert time.perf_counter() - started < 5.0
+
+
+def test_exhausted_screen_budget_cannot_silently_drop_pending_code(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(policy, "_MAX_SCREEN_PASSES", 1)
+    result = assess_bash_command(_nest("bash -c 'sudo id'", 8), mode="off")
+    assert result.level == "deny"
+    assert "nesting limit" in result.reason
+
+
+def test_malformed_residual_code_fails_closed() -> None:
+    commands = policy._expansion_commands(["bash -c 'sudo id"])
+    assert policy._argv_hard_deny(commands) is not None
+
+
+@pytest.mark.parametrize("body", [
+    "date;pwd",
+    "date|cat",
+    "bash -c 'date;pwd'",
+    "watch 'date'",
+    "env -S 'date'",
+    "rm -rf /tmp/frontier-policy-test",
+    "echo ok > /tmp/frontier-policy-test",
+])
+def test_benign_deep_code_survives_bounded_screen(body: str) -> None:
+    assert assess_bash_command(_nest(body, 8), mode="off").level == "allow"

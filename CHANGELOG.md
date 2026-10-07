@@ -65,6 +65,17 @@ Initial open-source release of FrontierAgent.
 
 ### Fixed
 
+- **Shell nesting past the parser's recursion limit no longer bypasses the
+  group denials.** `_parse_commands` stopped recursing at four levels and
+  stopped *silently*, so `$($($($($($(sudo id))))))` assessed as `allow` in
+  `off` mode — the mode most deployments run — against rules that are supposed
+  to bind unconditionally. At the limit a bounded screen now checks shell
+  separators, quoted evaluator payloads, and full argument lists as well as
+  candidate executable names. Unparseable or excessively quoted residual code
+  is refused rather than silently skipped. Plain substitution chains are
+  screened in linear time without additional parser recursion. The fallback
+  deliberately treats code-looking data conservatively past the limit.
+
 - **A skipped sandbox-isolation test can no longer pass for verification.**
   The real-bubblewrap test's guard probed with `bwrap --ro-bind / / true`,
   which fails on a *working* host — bwrap is not setuid, so without
