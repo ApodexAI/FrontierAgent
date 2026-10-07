@@ -711,3 +711,111 @@ def test_the_word_screen_is_conservative_past_the_limit() -> None:
     assert assess_bash_command(quoted_data, mode="off").level == "deny"
     # Below the limit the same text is read properly and allowed.
     assert assess_bash_command(_nest("echo ssh", 2), mode="off").level == "allow"
+
+
+@pytest.mark.parametrize("mode", MODES)
+@pytest.mark.parametrize("depth", [4, 5, 6, 12, 40])
+@pytest.mark.parametrize(("body", "group"), [
+    ("date;sudo id", "priv_esc"),
+    ("date|ssh h id", "exfil"),
+    ("date&&pkill -f x", "process_kill"),
+    ("date||sudo id", "priv_esc"),
+    ("date&sudo id", "priv_esc"),
+    ("date\nsudo id", "priv_esc"),
+])
+def test_deep_screen_splits_shell_command_separators(
+    body: str, group: str, depth: int, mode: str,
+) -> None:
+    result = assess_bash_command(_nest(body, depth), mode=mode)
+    assert result.level == "deny"
+    assert result.group == group
+
+
+@pytest.mark.parametrize("mode", MODES)
+@pytest.mark.parametrize("depth", [4, 5, 8, 40])
+@pytest.mark.parametrize(("body", "group"), [
+    ("bash -c 'sudo id'", "priv_esc"),
+    ('bash -c "ssh h id"', "exfil"),
+    ("watch 'pkill -f x'", "process_kill"),
+    ("env -S 'sudo id'", "priv_esc"),
+    ("bash -c 'date;sudo id'", "priv_esc"),
+    ('bash -c "su\\\"do\\\" id"', "priv_esc"),
+    (r"bash -c $'\x73udo id'", "priv_esc"),
+    (r"bash -c 's\udo id'", "priv_esc"),
+])
+def test_deep_screen_decodes_quoted_and_escaped_code(
+    body: str, group: str, depth: int, mode: str,
+) -> None:
+    result = assess_bash_command(_nest(body, depth), mode=mode)
+    assert result.level == "deny"
+    assert result.group == group
+
+
+@pytest.mark.parametrize("mode", MODES)
+@pytest.mark.parametrize("body", [
+    "rm -rf /etc",
+    "env rm -rf /etc",
+    "chmod -R 777 /etc",
+    "chown -R root /etc",
+    "find /etc -delete",
+    "date;rm -rf /etc",
+    "bash -c 'rm -rf /etc'",
+    "bash -c 'cd /etc; rm -rf .'",
+    "if rm -rf /etc; then date; fi",
+    "find /tmp -exec rm -rf /etc \\;",
+])
+def test_deep_screen_preserves_argument_sensitive_hard_denials(body: str, mode: str) -> None:
+    result = assess_bash_command(_nest(body, 8), mode=mode, interactive=True)
+    assert result.level == "deny"
+    assert not result.group
+
+
+@pytest.mark.parametrize("mode", MODES)
+@pytest.mark.parametrize("body", ["date;sudo id", "bash -c 'sudo id'"])
+def test_deep_group_denials_still_require_human_confirmation(body: str, mode: str) -> None:
+    result = assess_bash_command(_nest(body, 8), mode=mode, interactive=True)
+    assert result.level == "confirm"
+    assert result.group == "priv_esc"
+
+
+@pytest.mark.parametrize("mode", MODES)
+@pytest.mark.parametrize("interactive", [False, True])
+def test_excessive_quoting_fails_closed_with_bounded_work(mode: str, interactive: bool) -> None:
+    import shlex
+    import time
+
+    body = "sudo id"
+    for _ in range(9):
+        body = shlex.quote(body)
+    started = time.perf_counter()
+    result = assess_bash_command(_nest("eval " + body, 6), mode=mode, interactive=interactive)
+    assert result.level == "deny"
+    assert "nesting limit" in result.reason
+    assert time.perf_counter() - started < 5.0
+
+
+def test_exhausted_screen_budget_cannot_silently_drop_pending_code(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(policy, "_MAX_SCREEN_PASSES", 1)
+    result = assess_bash_command(_nest("bash -c 'sudo id'", 8), mode="off")
+    assert result.level == "deny"
+    assert "nesting limit" in result.reason
+
+
+def test_malformed_residual_code_fails_closed() -> None:
+    commands = policy._expansion_commands(["bash -c 'sudo id"])
+    assert policy._argv_hard_deny(commands) is not None
+
+
+@pytest.mark.parametrize("body", [
+    "date;pwd",
+    "date|cat",
+    "bash -c 'date;pwd'",
+    "watch 'date'",
+    "env -S 'date'",
+    "rm -rf /tmp/frontier-policy-test",
+    "echo ok > /tmp/frontier-policy-test",
+])
+def test_benign_deep_code_survives_bounded_screen(body: str) -> None:
+    assert assess_bash_command(_nest(body, 8), mode="off").level == "allow"
