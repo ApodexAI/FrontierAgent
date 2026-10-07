@@ -310,12 +310,22 @@ async def _run_supervised_shell(
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(proc.communicate(), timeout=5)
             raise
-        if status:
-            with contextlib.suppress(OSError):
-                parent_control.send(b"S")
+        if not status:
+            # The supervisor exits before running the shell when it cannot
+            # supervise it (no subreaper, no /proc children list). Its exit
+            # code is not the command's, so report it as unavailable.
+            await asyncio.wait_for(proc.wait(), timeout=5)
+            detail = err.decode("utf-8", "replace").strip().splitlines()
+            raise RuntimeError(
+                "native shell supervisor is unavailable on this system "
+                f"(exit {proc.returncode}); command was not run"
+                + (f": {detail[-1]}" if detail else "")
+            )
+        with contextlib.suppress(OSError):
+            parent_control.send(b"S")
         await asyncio.wait_for(proc.wait(), timeout=5)
         return (
-            int(status) if status else (proc.returncode or 0),
+            int(status),
             out.decode("utf-8", "replace"),
             err.decode("utf-8", "replace"),
         )

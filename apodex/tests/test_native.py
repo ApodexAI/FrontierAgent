@@ -217,6 +217,22 @@ async def test_run_shell_supervisor_ignores_workspace_modules(tmp_path) -> None:
     assert result == (0, "ok", "")
 
 
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux subreaper")
+async def test_run_shell_reports_unavailable_supervisor(
+    tmp_path, monkeypatch,
+) -> None:
+    fake = tmp_path / "supervisor.py"
+    fake.write_text(
+        "raise OSError(95, 'cannot enable child subreaper')\n"
+    )
+    monkeypatch.setattr(sandbox, "_SUPERVISOR", str(fake))
+    with pytest.raises(RuntimeError, match="command was not run.*subreaper"):
+        await sandbox.run_shell(
+            "touch marker", str(tmp_path), 5, Strategy(NATIVE, "test"),
+        )
+    assert not (tmp_path / "marker").exists()
+
+
 def test_nonroot_native_current_sandbox_skips_tool_user_warning(
     tmp_path, monkeypatch, caplog,
 ) -> None:
