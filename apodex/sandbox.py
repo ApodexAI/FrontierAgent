@@ -261,6 +261,12 @@ async def run_shell(
     return await _run_group_shell(command, cwd, timeout)
 
 
+# Run by file path under -P so neither cwd nor this package's directory
+# lands on sys.path: a workspace's own apodex/ or ctypes.py must not
+# shadow the supervisor or the stdlib modules it imports.
+_SUPERVISOR = str(Path(__file__).with_name("_shell_supervisor.py"))
+
+
 async def _run_supervised_shell(
     command: str, cwd: str, timeout: int,
 ) -> tuple[int, str, str]:
@@ -268,7 +274,7 @@ async def _run_supervised_shell(
     parent_control, child_control = socket.socketpair()
     try:
         proc = await asyncio.create_subprocess_exec(
-            sys.executable, "-m", "apodex._shell_supervisor",
+            sys.executable, "-P", _SUPERVISOR,
             str(child_control.fileno()), command,
             cwd=cwd,
             stdout=asyncio.subprocess.PIPE,

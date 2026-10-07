@@ -205,6 +205,18 @@ async def test_run_shell_preserves_signal_exit_code(tmp_path) -> None:
     assert result[0] == -15
 
 
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux subreaper")
+async def test_run_shell_supervisor_ignores_workspace_modules(tmp_path) -> None:
+    (tmp_path / "apodex").mkdir()
+    (tmp_path / "apodex" / "__init__.py").write_text("raise SystemExit(7)\n")
+    for name in ("ctypes", "select"):
+        (tmp_path / f"{name}.py").write_text("raise SystemExit(7)\n")
+    result = await sandbox.run_shell(
+        "printf ok", str(tmp_path), 5, Strategy(NATIVE, "test"),
+    )
+    assert result == (0, "ok", "")
+
+
 def test_nonroot_native_current_sandbox_skips_tool_user_warning(
     tmp_path, monkeypatch, caplog,
 ) -> None:
