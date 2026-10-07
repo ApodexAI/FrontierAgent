@@ -289,13 +289,36 @@ def test_tree_cleanup_removes_only_this_conversation(monkeypatch, tmp_path) -> N
 
 
 # ── real jail (needs a host where bwrap can create namespaces) ───────────
+#
+# A skip here is not a pass: the mount isolation these tests check is the only
+# thing standing between two conversations' recovery files once a command runs
+# inside the jail, and the argument lists asserted elsewhere in this file
+# cannot show that the kernel honoured them. So a deployment that requires
+# bubblewrap sets ``FRONTIER_AGENT_REQUIRE_BWRAP=1`` (CI does) and the skip
+# becomes a failure that names why the jail was unusable.
+
+_REQUIRE_BWRAP_ENV = "FRONTIER_AGENT_REQUIRE_BWRAP"
 
 
-@pytest.mark.skipif(
-    not _sandbox.bwrap_available(),
-    reason="bwrap cannot create namespaces here; isolation is NOT verified by a skip",
-)
+def _require_real_jail() -> None:
+    """Skip, or fail when this deployment requires a usable jail."""
+    usable, why_not = _sandbox.bwrap_probe()
+    if usable:
+        return
+    message = f"bubblewrap cannot create namespaces here: {why_not}"
+    if os.environ.get(_REQUIRE_BWRAP_ENV, "").strip() == "1":
+        pytest.fail(
+            f"{message}\n"
+            f"{_REQUIRE_BWRAP_ENV}=1 says this environment must be able to run "
+            "the jail, so the isolation below is unverified rather than "
+            "inapplicable. Install bubblewrap and allow unprivileged user "
+            "namespaces, or unset the variable to accept a skip.",
+        )
+    pytest.skip(message)
+
+
 def test_real_jail_shows_only_the_current_scope(tmp_path, monkeypatch) -> None:
+    _require_real_jail()
     monkeypatch.setenv("SANDBOX_BACKEND", "bwrap")
     sandbox = _sandbox.BwrapSandbox(workspace=tmp_path / "ws")
     with _scoped("T", "a"):
@@ -310,12 +333,43 @@ def test_real_jail_shows_only_the_current_scope(tmp_path, monkeypatch) -> None:
     sandbox.kill()
 
 
-def test_bwrap_is_really_unavailable_here_when_skipped() -> None:
-    """Records WHY the real-jail test skips on this host, so a skip is never
-    read as a pass."""
-    if _sandbox.bwrap_available() or shutil.which("bwrap") is None:
-        pytest.skip("not applicable")
-    probe = subprocess.run(
+def test_the_probe_uses_the_arguments_the_sandbox_runs() -> None:
+    """The guard that used to live here probed with ``bwrap --ro-bind / /``,
+    which fails on a WORKING host — bwrap is not setuid, so without
+    ``--unshare-user`` it cannot get a mount namespace. It therefore
+    "confirmed" unavailability everywhere and could never catch a silent skip.
+
+    ``bwrap_probe`` answers with the argument set the sandbox actually uses.
+    """
+    usable, why_not = _sandbox.bwrap_probe()
+    assert usable == _sandbox.bwrap_available()
+    assert usable != bool(why_not), "a usable probe must give no reason, and vice versa"
+    if shutil.which("bwrap") is None:
+        assert not usable
+        return
+    naive = subprocess.run(
         ["bwrap", "--ro-bind", "/", "/", "true"], capture_output=True, text=True,
     )
-    assert probe.returncode != 0
+    if usable and naive.returncode != 0:
+        # The exact trap: the naive probe says "broken" while the jail works.
+        assert "--unshare-user" in _sandbox._bwrap_base_args()
+
+
+def test_requiring_bwrap_turns_a_skip_into_a_failure(monkeypatch) -> None:
+    monkeypatch.setattr(_sandbox, "bwrap_probe", lambda: (False, "no user namespaces"))
+    monkeypatch.setenv(_REQUIRE_BWRAP_ENV, "1")
+    with pytest.raises(pytest.fail.Exception) as excinfo:
+        _require_real_jail()
+    assert "no user namespaces" in str(excinfo.value)
+    assert "unverified" in str(excinfo.value)
+
+    monkeypatch.delenv(_REQUIRE_BWRAP_ENV)
+    with pytest.raises(pytest.skip.Exception) as skipped:
+        _require_real_jail()
+    assert "cannot create namespaces" in str(skipped.value)
+
+
+def test_a_usable_jail_is_never_skipped(monkeypatch) -> None:
+    monkeypatch.setattr(_sandbox, "bwrap_probe", lambda: (True, ""))
+    monkeypatch.setenv(_REQUIRE_BWRAP_ENV, "1")
+    _require_real_jail()  # must not raise

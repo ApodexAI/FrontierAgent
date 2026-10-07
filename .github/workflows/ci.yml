@@ -22,7 +22,22 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install local sandbox runtime
-        run: sudo apt-get update && sudo apt-get install -y bubblewrap
+        run: |
+          sudo apt-get update && sudo apt-get install -y bubblewrap
+          # Ubuntu 24.04 (the runner image) restricts unprivileged user
+          # namespaces through AppArmor, which is what bwrap needs for its uid
+          # map ("bwrap: setting up uid map: Permission denied"). Without this
+          # the whole bwrap backend is unavailable and every real-jail test
+          # skips, so the sandbox isolation CI claims to cover is not covered.
+          # ``|| true``: the knob does not exist on every kernel, and the
+          # probe below reports the real state either way.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+          sudo sysctl -w kernel.unprivileged_userns_clone=1 || true
+          # Record what the sandbox's own probe makes of this host, so a future
+          # failure is diagnosable from the log without a code change.
+          bwrap --unshare-user --ro-bind / / -- true \
+            && echo "bwrap: usable" \
+            || echo "bwrap: UNUSABLE (the jail tests will fail, not skip)"
       - name: Install framework dependencies
         run: uv sync --locked --extra dev --extra sandbox --extra document-readers --extra hf-space
       - name: Ruff lint
@@ -91,4 +106,13 @@ jobs:
       - name: Unit and exec-bundle tests
         env:
           SANDBOX_BACKEND: bwrap
-        run: uv run pytest -q
+          # This job installs bubblewrap, so a sandbox-isolation test that
+          # SKIPS here is a silent loss of coverage, not an inapplicable case.
+          # The flag turns such a skip into a failure that names why the jail
+          # was unusable (Ubuntu 24.04, for instance, restricts unprivileged
+          # user namespaces through AppArmor).
+          FRONTIER_AGENT_REQUIRE_BWRAP: "1"
+        # ``-rs``: without it a skip is invisible in the log — only the count
+        # changes, and the count is identical whether the jail test ran or was
+        # skipped, so the log could not answer "did this actually run".
+        run: uv run pytest -q -rs
