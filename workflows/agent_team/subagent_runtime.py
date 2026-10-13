@@ -58,6 +58,7 @@ from frontier_agent.core.runtime.loop.tiered_compact import (
     compaction_trigger_tokens,
 )
 from frontier_agent.core.runtime.loop.tool_exec import ToolResultPostProcessor
+from frontier_agent.infra.config import get_config
 from frontier_agent.state.event_store.sqlite import EventStore
 from plugins.tools._filesystem_state import current_filesystem_state
 from plugins.tools.bash import BASH_STDERR_SEPARATOR
@@ -741,13 +742,6 @@ class SwarmToolResultPostProcessor(ToolResultPostProcessor):
     })
 
     _BUDGETS: ClassVar[dict[str, int]] = {
-        "bash": 4_000,
-        "run_python_code": 5_000,
-        # Gate ① overflows these to disk at meta.max_result_chars=8K and puts the
-        # "saved to <path>, use read_file" pointer at the TAIL. The 6K default cut
-        # below that and took the pointer with it, leaving a truncated result with
-        # no way back to the rest. 10K leaves the 8K body and its footer room to
-        # both survive — the value react has carried for this reason all along.
         "grep_search": 10_000,
         "glob_search": 10_000,
         # Belt-and-suspenders: collect_reports is whitelisted above (pass-
@@ -756,6 +750,17 @@ class SwarmToolResultPostProcessor(ToolResultPostProcessor):
         # TOOL_RESULT_MAX_CHARS ceiling) rather than falling back to 6K.
         "collect_reports": 150_000,
     }
+    # bash / run_python_code overflow to disk at gate ①, which is configurable
+    # via TOOL_EXEC_RESULT_MAX_CHARS, and they carry two things worth keeping:
+    # the "saved to <path>, use read_file" pointer and the exit status, both of
+    # which live at the tail. Gate ② must therefore track gate ① — a deployment
+    # that raises the exec cap to give long scans more room would otherwise have
+    # gate ② cut the extra room straight back off, and a deployment that raises
+    # it above the fixed 6K default would lose the recovery path entirely. Same
+    # rule, same headroom, as the React processor in
+    # workflows.stateful_react_agent._runtime.
+    _CONFIGURED_EXEC_TOOLS = frozenset({"bash", "run_python_code"})
+    _EXEC_FOOTER_HEADROOM = 2_000
     _BUDGET_DEFAULT = 6_000
 
     _BASH_STDERR_KEEP = 3_000
@@ -777,7 +782,15 @@ class SwarmToolResultPostProcessor(ToolResultPostProcessor):
         if name in self._PASS_THROUGH:
             return content
 
-        budget = self._BUDGETS.get(name, self._BUDGET_DEFAULT)
+        if name in self._CONFIGURED_EXEC_TOOLS:
+            # Gate ① is configurable. Gate ② must track it or a deployment
+            # raising TOOL_EXEC_RESULT_MAX_CHARS can lose the overflow pointer.
+            budget = (
+                get_config().tool_exec_result_max_chars
+                + self._EXEC_FOOTER_HEADROOM
+            )
+        else:
+            budget = self._BUDGETS.get(name, self._BUDGET_DEFAULT)
         if name == "bash":
             return self._compact_bash(content, budget)
         return self._head_cap(content, budget)

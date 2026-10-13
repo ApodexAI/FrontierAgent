@@ -492,3 +492,64 @@ def test_site3_keeps_the_self_pagination_pointer(processor, tool: str) -> None:
     # work instead of being handed the path or offset that continues it.
     assert "/spill/abc123.md" in out, f"{tool}: recovery pointer was cut"
     assert out == body, f"{tool}: body was shortened despite fitting gate ①"
+
+
+_EXEC_TOOLS = ["bash", "run_python_code"]
+
+
+@pytest.mark.parametrize("processor", _processors())
+@pytest.mark.parametrize("tool", _EXEC_TOOLS)
+def test_the_exec_pointer_survives_the_default_gate_1(
+    processor, tool: str, spill_store
+) -> None:
+    """gate ② must not cut below the gate ① preview it is protecting.
+
+    ``bash``/``run_python_code`` overflow to disk at gate ①
+    (``meta.max_result_chars`` = ``tool_exec_result_max_chars``, 8K by default)
+    and the preview that comes back carries both the recovery pointer and, for
+    bash, the exit status. Those live at the tail. If gate ②'s budget for these
+    tools is a hardcoded number below gate ①, it takes the pointer and the
+    verdict with it and the agent is left with a truncated result it cannot
+    recover — the exact failure the 10K grep/glob entries above exist to prevent,
+    one layer down.
+    """
+    from frontier_agent.core.loop_types import ToolResult
+    from frontier_agent.infra.config import get_config
+    from plugins.tools import _overflow
+
+    cap = get_config().tool_exec_result_max_chars
+    body = _overflow.maybe_overflow(tool, _pytest_output(cap * 3))
+    assert "saved read-only at" in body, f"{tool}: fixture did not overflow"
+
+    out = processor.process(ToolResult(
+        name=tool, args={}, result=body, duration_ms=0,
+        tool_call_id="call-1", is_error=False,
+    ))
+
+    assert "saved read-only at" in out, f"{tool}: gate ② cut gate ①'s recovery pointer"
+    assert "1 failed, 812 passed" in out, f"{tool}: gate ② cut gate ①'s verdict"
+
+
+@pytest.mark.parametrize("processor", _processors())
+@pytest.mark.parametrize("tool", _EXEC_TOOLS)
+def test_gate_2_follows_a_raised_exec_cap(processor, tool: str, monkeypatch) -> None:
+    """Raising ``TOOL_EXEC_RESULT_MAX_CHARS`` has to widen gate ② too.
+
+    The cap is documented as tunable (docs/tool-result-truncation-ab.md runs the
+    A/B at 8000 vs 50000). A deployment that raises it to give long scans more
+    room must actually get more room; a fixed gate ② would silently cap the gain
+    at its own hardcoded number.
+    """
+    from frontier_agent.core.loop_types import ToolResult
+    from frontier_agent.infra.config import get_config
+
+    monkeypatch.setattr(get_config(), "tool_exec_result_max_chars", 50_000)
+    body = _pytest_output(40_000)
+
+    out = processor.process(ToolResult(
+        name=tool, args={}, result=body, duration_ms=0,
+        tool_call_id="call-1", is_error=False,
+    ))
+
+    # 50K + 2K headroom covers the 40K body, so nothing is cut.
+    assert out == body, f"{tool}: a raised gate ① did not widen gate ②"
