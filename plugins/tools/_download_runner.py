@@ -267,17 +267,21 @@ def _preflight(
 
 
 def _header_filename(headers: email.message.Message) -> str:
+    extended = ""
     fallback = ""
     for name, value in headers.get_params(header="content-disposition", failobj=[]):
         if name != "filename":
             continue
         # The parser represents filename* as an RFC 2231 tuple. Prefer it
-        # over the ordinary filename, regardless of parameter order.
+        # over the ordinary filename, regardless of parameter order, but only
+        # when it decodes to something usable: an empty filename* must not
+        # discard a valid ordinary filename.
         if isinstance(value, tuple):
-            return email.utils.collapse_rfc2231_value(value).strip()
-        if not fallback:
+            if not extended:
+                extended = email.utils.collapse_rfc2231_value(value).strip()
+        elif not fallback:
             fallback = value.strip()
-    return fallback
+    return extended or fallback
 
 
 def _safe_filename(candidate: str) -> str:

@@ -27,6 +27,9 @@ from plugins.tools._download_runner import _header_filename, _resolve_basename
             'attachment; filename*=UTF-8\'\'actual.pdf; filename="fallback.txt"',
             "actual.pdf",
         ),
+        ('attachment; filename="paper.pdf"; filename*=UTF-8\'\'', "paper.pdf"),
+        ("attachment; filename*=UTF-8''; filename=\"paper.pdf\"", "paper.pdf"),
+        ("attachment; filename*=UTF-8''%20%20; filename=\"paper.pdf\"", "paper.pdf"),
         ("attachment", ""),
     ],
 )
@@ -50,6 +53,7 @@ def test_response_filename(disposition: str, expected: str) -> None:
         ("", 'attachment; filename="../../outside.pdf"', "outside.pdf"),
         ("", "attachment; filename*=UTF-8''..%2Foutside.pdf", "outside.pdf"),
         ("", "attachment", "url name.pdf"),
+        ("", 'attachment; filename="paper.pdf"; filename*=UTF-8\'\'', "paper.pdf"),
         ("", "", "url name.pdf"),
         ("chosen.pdf", 'attachment; filename="report;final.pdf"', "chosen.pdf"),
     ],
