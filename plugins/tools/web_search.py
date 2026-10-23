@@ -14,6 +14,7 @@ from frontier_agent.core.tool import tool
 from frontier_agent.infra.config import get_config
 from frontier_agent.infra.usage_meter import record_api_request
 from plugins.tools._coerce import coerce_json_list
+from plugins.tools._keenable_search import keenable_search_batch
 from plugins.tools._parallel_search import (
     parallel_search_batch,
     selected_search_provider,
@@ -464,9 +465,10 @@ async def web_search(
 
     provider = selected_search_provider()
     if not valid_search_provider(provider):
-        return "Error: WEB_SEARCH_PROVIDER must be 'serper' or 'parallel'."
-    if provider == "parallel":
-        datas = await parallel_search_batch(
+        return "Error: WEB_SEARCH_PROVIDER must be 'serper', 'parallel', or 'keenable'."
+    if provider in ("parallel", "keenable"):
+        search_batch = keenable_search_batch if provider == "keenable" else parallel_search_batch
+        datas = await search_batch(
             queries,
             num_results=num_results,
             gl=gl,
@@ -507,7 +509,7 @@ async def web_search(
 def _format_parallel_query_results(
     queries: list[str], datas: list[dict], max_results: int,
 ) -> str:
-    """Keep the canonical query-labelled output for Parallel MCP batches."""
+    """Keep the canonical query-labelled output for Parallel MCP and Keenable batches."""
     seen_urls: set[str] = set()
     blocks: list[str] = []
     for query, data in zip(queries, datas, strict=False):

@@ -223,10 +223,10 @@ def inspect_runtime_config(
         env=env,
     )
     search_provider = (env.get("WEB_SEARCH_PROVIDER") or "serper").strip().lower()
-    if "web_search" in tool_names and search_provider not in {"serper", "parallel"}:
+    if "web_search" in tool_names and search_provider not in {"serper", "parallel", "keenable"}:
         issues.append(RuntimeConfigIssue(
             code="invalid_web_search_provider",
-            message="WEB_SEARCH_PROVIDER must be set to 'serper' or 'parallel'.",
+            message="WEB_SEARCH_PROVIDER must be set to 'serper', 'parallel', or 'keenable'.",
             env_var="WEB_SEARCH_PROVIDER",
         ))
     if (
