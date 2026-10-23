@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 _MCP_URL = "https://search.parallel.ai/mcp"
 _INITIAL_PROTOCOL_VERSION = "2025-03-26"
 _ANONYMOUS_MAX_RESULTS = 10
-_PROVIDER_NAMES = frozenset({"serper", "parallel"})
+_PROVIDER_NAMES = frozenset({"serper", "parallel", "keenable"})
 
 
 def selected_search_provider() -> str:

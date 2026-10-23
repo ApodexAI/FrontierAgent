@@ -90,6 +90,8 @@ cp .env.example .env
 #   OPENAI_MODEL=gpt-4o
 # For keyless Parallel search set WEB_SEARCH_PROVIDER=parallel; it returns up
 # to 10 results per query. Serper remains the default and uses SERPER_API_KEY.
+# For keyless Keenable search set WEB_SEARCH_PROVIDER=keenable; it returns up
+# to 50 results per query, and an optional KEENABLE_API_KEY raises rate limits.
 # Page fetch uses JINA_API_KEY.
 
 # Interactive TUI, Stateful ReAct, against another repository

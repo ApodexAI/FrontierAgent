@@ -74,6 +74,9 @@ Add `WEB_SEARCH_PROVIDER=parallel` to this file to use the keyless Parallel
 Search MCP for `web_search`; it supports up to 10 results per query. Serper
 remains the default. Exporting the setting also works for native runs.
 `web_fetch` keeps its existing provider.
+`WEB_SEARCH_PROVIDER=keenable` selects the keyless Keenable search API in the
+same way; it supports up to 50 results per query, and an optional
+`KEENABLE_API_KEY` in this file raises the rate limits.
 `APODEX_ENV_FILE=/path/to/file` points the CLI at a different file.
 
 Rules for the file:

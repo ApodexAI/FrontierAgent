@@ -119,6 +119,14 @@ def test_search_credentials_are_checked_when_the_profile_binds_the_web_tools():
     assert parallel.ok
     assert [issue.code for issue in parallel.warnings] == ["missing_jina_api_key"]
 
+    keenable = inspect_runtime_config(
+        cfg,
+        profile=_profile(tool_names=_WEB_TOOLS),
+        environ={"WEB_SEARCH_PROVIDER": "keenable"},
+    )
+    assert keenable.ok
+    assert [issue.code for issue in keenable.warnings] == ["missing_jina_api_key"]
+
     invalid_provider = inspect_runtime_config(
         cfg,
         profile=_profile(tool_names=_WEB_TOOLS),
