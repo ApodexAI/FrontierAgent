@@ -134,7 +134,7 @@ class FrontierAgentConfig(BaseSettings):
     openai_model: str = "gpt-4o"
     openai_base_url: str = "https://api.openai.com/v1"
     anthropic_api_key: str = ""
-    anthropic_model: str = "claude-sonnet-4-20250514"
+    anthropic_model: str = "claude-sonnet-5-5"
     anthropic_base_url: str = ""
     anthropic_thinking: bool = False
     anthropic_thinking_type: str = "adaptive"

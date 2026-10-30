@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import re
 import time
 from collections.abc import AsyncIterator
 from typing import Any, TypeGuard
@@ -365,6 +366,23 @@ class FallbackLLM(LLMClient):
             raise last_error from fb_err
 
 
+# Claude 5 models and Opus 4.7+ reject non-default sampling parameters (temperature) with a 400.
+# Not anchored, so OpenRouter (``anthropic/claude-sonnet-5.5``) and Bedrock
+# (``global.anthropic.claude-sonnet-5-5``) ids match too.
+_ANTHROPIC_NO_SAMPLING_MODEL = re.compile(
+    r"claude-(?:(?:opus|sonnet|haiku|fable|mythos)-5|opus-4[-.][78])"
+)
+
+
+def _anthropic_temperature(
+    model: str, thinking: dict[str, Any] | None, temperature: float = 0.3,
+) -> float | None:
+    """Sampling temperature for the Anthropic client, ``None`` to omit it."""
+    if thinking or _ANTHROPIC_NO_SAMPLING_MODEL.search(model):
+        return None
+    return temperature
+
+
 def _anthropic_thinking_kwarg(config: Any, max_tokens: int) -> dict[str, Any] | None:
     """Anthropic extended-thinking request kwarg, or ``None`` when off.
 
@@ -432,13 +450,14 @@ def _create_single_provider(config: FrontierAgentConfig, model_override: str | N
         from frontier_agent.infra.anthropic_client import AnthropicClient
         # Opt-in extended thinking (ANTHROPIC_THINKING): standard enabled+budget
         # thinking + drop temperature (Anthropic 400s on the combo). Flag off →
-        # prior kwargs preserved exactly (temperature=0.3, no thinking).
+        # prior kwargs preserved exactly (temperature=0.3 except on Claude 5 models, no thinking).
         thinking = _anthropic_thinking_kwarg(config, max_tokens)
+        model = model_override or config.anthropic_model
         return AnthropicClient(
-            model=model_override or config.anthropic_model,
+            model=model,
             api_key=config.anthropic_api_key,
             base_url=config.anthropic_base_url or None,
-            temperature=None if thinking else 0.3,
+            temperature=_anthropic_temperature(model, thinking),
             max_tokens=max_tokens,
             thinking=thinking,
             effort=_anthropic_effort_kwarg(config, thinking),
@@ -620,15 +639,16 @@ def _create_overridden_provider(
         # enabled+budget thinking + drop temperature. Flag off → prior kwargs
         # preserved exactly.
         thinking = _anthropic_thinking_kwarg(config, max_tokens)
+        anthropic_model = model if (provider and model) else _resolve_model_name(
+            config, resolved_provider, model,
+        )
         return AnthropicClient(
-            model=model if (provider and model) else _resolve_model_name(
-                config, resolved_provider, model,
-            ),
+            model=anthropic_model,
             api_key=api_key if api_key is not None else config.anthropic_api_key,
             # Honour a per-entry base_url (fallback-chain / override) — fall back
             # to the configured default only when the caller didn't pass one.
             base_url=(base_url if base_url is not None else config.anthropic_base_url) or None,
-            temperature=None if thinking else temperature,
+            temperature=_anthropic_temperature(anthropic_model, thinking, temperature),
             max_tokens=max_tokens,
             thinking=thinking,
             effort=_anthropic_effort_kwarg(config, thinking),
