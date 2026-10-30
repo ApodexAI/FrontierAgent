@@ -366,15 +366,21 @@ class FallbackLLM(LLMClient):
             raise last_error from fb_err
 
 
-# Claude 5 models reject non-default sampling parameters (temperature) with a 400.
-_ANTHROPIC_NO_SAMPLING_MODEL = re.compile(r"^claude-(opus|sonnet|haiku|fable|mythos)-5")
+# Claude 5 models and Opus 4.7+ reject non-default sampling parameters (temperature) with a 400.
+# Not anchored, so OpenRouter (``anthropic/claude-sonnet-5.5``) and Bedrock
+# (``global.anthropic.claude-sonnet-5-5``) ids match too.
+_ANTHROPIC_NO_SAMPLING_MODEL = re.compile(
+    r"claude-(?:(?:opus|sonnet|haiku|fable|mythos)-5|opus-4[-.][78])"
+)
 
 
-def _anthropic_temperature(model: str, thinking: dict[str, Any] | None) -> float | None:
+def _anthropic_temperature(
+    model: str, thinking: dict[str, Any] | None, temperature: float = 0.3,
+) -> float | None:
     """Sampling temperature for the Anthropic client, ``None`` to omit it."""
-    if thinking or _ANTHROPIC_NO_SAMPLING_MODEL.match(model):
+    if thinking or _ANTHROPIC_NO_SAMPLING_MODEL.search(model):
         return None
-    return 0.3
+    return temperature
 
 
 def _anthropic_thinking_kwarg(config: Any, max_tokens: int) -> dict[str, Any] | None:
@@ -633,15 +639,16 @@ def _create_overridden_provider(
         # enabled+budget thinking + drop temperature. Flag off → prior kwargs
         # preserved exactly.
         thinking = _anthropic_thinking_kwarg(config, max_tokens)
+        anthropic_model = model if (provider and model) else _resolve_model_name(
+            config, resolved_provider, model,
+        )
         return AnthropicClient(
-            model=model if (provider and model) else _resolve_model_name(
-                config, resolved_provider, model,
-            ),
+            model=anthropic_model,
             api_key=api_key if api_key is not None else config.anthropic_api_key,
             # Honour a per-entry base_url (fallback-chain / override) — fall back
             # to the configured default only when the caller didn't pass one.
             base_url=(base_url if base_url is not None else config.anthropic_base_url) or None,
-            temperature=None if thinking else temperature,
+            temperature=_anthropic_temperature(anthropic_model, thinking, temperature),
             max_tokens=max_tokens,
             thinking=thinking,
             effort=_anthropic_effort_kwarg(config, thinking),
