@@ -1,4 +1,4 @@
-"""Keyless Keenable search transport for the native web-search tools."""
+"""Keenable search transport for the native web-search tools."""
 
 from __future__ import annotations
 
@@ -91,12 +91,15 @@ async def keenable_search_batch(
 ) -> list[dict[str, Any]] | str:
     """Search Keenable for each query concurrently.
 
-    Works without a key; ``KEENABLE_API_KEY`` is optional and only raises the
-    rate limits. Locale and time controls are rejected when requested because
-    this backend does not expose them. Each query asks for at least ten and at
-    most fifty results, and all candidates are returned so callers can limit
-    results after display filtering and URL deduplication. The selected
-    provider never falls back to Serper on a transport or rate-limit error.
+    Without a key this calls the keyless, rate-limited public endpoint. With
+    ``KEENABLE_API_KEY`` set, calls are authenticated against the user's
+    Keenable account, which has higher limits and meters each call in that
+    account's credits. Locale and time controls are rejected when requested
+    because this backend does not expose them. Each query asks for at least
+    ten and at most fifty results, and all candidates are returned so callers
+    can limit results after display filtering and URL deduplication. The
+    selected provider never falls back to Serper on a transport or rate-limit
+    error.
     """
     if gl != "us" or hl != "en" or tbs:
         return (
