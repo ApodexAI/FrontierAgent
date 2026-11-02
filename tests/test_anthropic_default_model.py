@@ -1,3 +1,5 @@
+import pytest
+
 from frontier_agent.infra.config import FrontierAgentConfig
 from frontier_agent.infra.llm_adapter import _anthropic_temperature
 
@@ -58,3 +60,25 @@ def test_overridden_provider_omits_temperature_for_claude_5(monkeypatch):
 
     _create_overridden_provider(config, "claude-sonnet-4-6", temperature=0.7)
     assert captured["temperature"] == 0.7
+
+
+@pytest.mark.parametrize("factory_name", ["_create_single_provider", "_create_overridden_provider"])
+@pytest.mark.parametrize("model", [None, "claude-sonnet-4-20250514", "claude-sonnet-5-5"])
+def test_manual_thinking_migration_on_wire(factory_name, model):
+    from frontier_agent.infra import llm_adapter
+
+    config = FrontierAgentConfig(
+        _env_file=None, llm_provider="anthropic", anthropic_api_key="test-key",
+        anthropic_model="claude-sonnet-5-5", anthropic_thinking=True,
+        anthropic_thinking_type="enabled", anthropic_thinking_budget=2048,
+    )
+    client = getattr(llm_adapter, factory_name)(config, model)
+    payload = client._build_kwargs(
+        [{"role": "user", "content": "hello"}], tools=None, temperature=None,
+        max_tokens=None, extra_headers=None, timeout=None,
+    )
+    if model == "claude-sonnet-4-20250514":
+        assert payload["thinking"] == {"type": "enabled", "budget_tokens": 2048}
+    else:
+        assert payload["thinking"] == {"type": "adaptive", "display": "summarized"}
+    assert payload["model"] == (model or config.anthropic_model)

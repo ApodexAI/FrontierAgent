@@ -383,7 +383,9 @@ def _anthropic_temperature(
     return temperature
 
 
-def _anthropic_thinking_kwarg(config: Any, max_tokens: int) -> dict[str, Any] | None:
+def _anthropic_thinking_kwarg(
+    config: Any, max_tokens: int, model: str,
+) -> dict[str, Any] | None:
     """Anthropic extended-thinking request kwarg, or ``None`` when off.
 
     ``ANTHROPIC_THINKING`` on → the shape selected by ``anthropic_thinking_type``
@@ -400,7 +402,9 @@ def _anthropic_thinking_kwarg(config: Any, max_tokens: int) -> dict[str, Any] | 
     if not getattr(config, "anthropic_thinking", False):
         return None
     ttype = str(getattr(config, "anthropic_thinking_type", "adaptive") or "adaptive").strip().lower()
-    if ttype == "enabled":
+    # Claude 5 and Opus 4.7+ require adaptive thinking; migrate legacy budgets
+    # using the resolved model so role and fallback overrides stay compatible.
+    if ttype == "enabled" and not _ANTHROPIC_NO_SAMPLING_MODEL.search(model):
         budget = int(getattr(config, "anthropic_thinking_budget", 8192) or 8192)
         budget = max(1024, min(budget, int(max_tokens) - 1))
         return {"type": "enabled", "budget_tokens": budget}
@@ -451,8 +455,8 @@ def _create_single_provider(config: FrontierAgentConfig, model_override: str | N
         # Opt-in extended thinking (ANTHROPIC_THINKING): standard enabled+budget
         # thinking + drop temperature (Anthropic 400s on the combo). Flag off →
         # prior kwargs preserved exactly (temperature=0.3 except on Claude 5 models, no thinking).
-        thinking = _anthropic_thinking_kwarg(config, max_tokens)
         model = model_override or config.anthropic_model
+        thinking = _anthropic_thinking_kwarg(config, max_tokens, model)
         return AnthropicClient(
             model=model,
             api_key=config.anthropic_api_key,
@@ -638,10 +642,10 @@ def _create_overridden_provider(
         # Opt-in extended thinking (see sibling branch above): standard
         # enabled+budget thinking + drop temperature. Flag off → prior kwargs
         # preserved exactly.
-        thinking = _anthropic_thinking_kwarg(config, max_tokens)
         anthropic_model = model if (provider and model) else _resolve_model_name(
             config, resolved_provider, model,
         )
+        thinking = _anthropic_thinking_kwarg(config, max_tokens, anthropic_model)
         return AnthropicClient(
             model=anthropic_model,
             api_key=api_key if api_key is not None else config.anthropic_api_key,
