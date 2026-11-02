@@ -819,7 +819,7 @@ def test_native_workflow_run_is_steerable(tmp_path, monkeypatch):
             observer.steer_inbox.queue.append("and summarize it")
             return {"final_answer": "done"}
 
-    monkeypatch.setattr("benchmarks.public.core.kernel_adapter.BenchmarkSession", _Runtime)
+    monkeypatch.setattr("frontier_agent.runtime.WorkflowSession", _Runtime)
 
     session = TerminalSession(
         cfg=ModelConfig(model="fake", api_key="x", base_url=None), cwd=str(tmp_path),
@@ -872,7 +872,7 @@ def _run_workflow_returning(state: dict, tmp_path, monkeypatch) -> None:
         async def run(self, task, *, meta, pipeline_id, extra_input=None):
             return state
 
-    monkeypatch.setattr("benchmarks.public.core.kernel_adapter.BenchmarkSession", _Runtime)
+    monkeypatch.setattr("frontier_agent.runtime.WorkflowSession", _Runtime)
     session = TerminalSession(
         cfg=ModelConfig(model="fake", api_key="x", base_url=None), cwd=str(tmp_path),
         renderer=Renderer(theme="mono"), auto_approve=True, max_turns=5,
