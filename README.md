@@ -166,6 +166,15 @@ custom region, language, or time filters, or counts above 10 per query; choose
 Serper when those are needed.
 `web_fetch` continues to use its existing fetch provider.
 
+Set `WEB_SEARCH_PROVIDER=keenable` to use the
+[Keenable search API](https://docs.keenable.ai/api-reference) for `web_search`
+instead. Without a key it calls Keenable's keyless endpoint, which is
+rate-limited. With `KEENABLE_API_KEY` set, searches go through your Keenable
+account with higher limits and use that account's
+[credits](https://docs.keenable.ai/credits). Keenable returns up to 50 results
+per query and does not support the tool's custom region, language, or time
+filters; choose Serper when those are needed.
+
 Start the TUI:
 
 ```bash

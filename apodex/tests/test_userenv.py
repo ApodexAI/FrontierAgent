@@ -341,6 +341,27 @@ def test_forwarded_names_are_names_only_and_only_when_set(launch, user_file, mon
     assert _SECRET not in " ".join(names)
 
 
+def test_exported_keenable_key_is_forwarded_with_the_provider_from_dotenv(
+    launch, monkeypatch,
+) -> None:
+    # The .env.example layout: the provider is selected in .env and the key
+    # line is left blank. Blank entries are not file names, so the exported
+    # key reaches the container only through the well-known list.
+    _write(launch / ".env", "WEB_SEARCH_PROVIDER=keenable\nKEENABLE_API_KEY=\n")
+    # Recorded first so teardown also removes the value .env loads.
+    monkeypatch.setenv("WEB_SEARCH_PROVIDER", "")
+    monkeypatch.delenv("WEB_SEARCH_PROVIDER")
+    monkeypatch.setenv("KEENABLE_API_KEY", "keen-exported-secret")
+
+    resolution = load_environment()
+    names = resolution.forwarded_names()
+
+    assert "KEENABLE_API_KEY" not in resolution.file_names  # blank in .env
+    assert "WEB_SEARCH_PROVIDER" in names  # selected in .env
+    assert "KEENABLE_API_KEY" in names  # well-known and exported
+    assert "keen-exported-secret" not in " ".join(names)
+
+
 def test_empty_resolution_forwards_only_exported_well_known_names(monkeypatch) -> None:
     monkeypatch.setenv("OPENAI_MODEL", "m")
     monkeypatch.setenv("WEB_SEARCH_PROVIDER", "parallel")
