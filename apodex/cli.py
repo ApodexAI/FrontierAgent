@@ -114,6 +114,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="frontier-agent",
         description="A terminal-native FrontierAgent workflow client.",
+        epilog="Persistent background tasks: frontier-agent tasks --help",
     )
     p.add_argument("task", nargs="?", default=None, help="task to run (optional)")
     p.add_argument(
@@ -594,6 +595,11 @@ async def _amain(argv: list[str] | None = None) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    arguments = argv if argv is not None else sys.argv[1:]
+    if arguments and arguments[0] == "tasks":
+        from frontier_agent.superagent.cli import main as tasks_main
+
+        return tasks_main(arguments[1:])
     try:
         return asyncio.run(_amain(argv))
     except KeyboardInterrupt:

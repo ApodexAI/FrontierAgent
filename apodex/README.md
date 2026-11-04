@@ -2,6 +2,11 @@
 
 Command: `frontier-agent` (compatibility alias: `apodex`; module: `python -m apodex`).
 
+For persistent background tasks, run `frontier-agent tasks --help`. This optional
+client connects to a local task store and a separate service with per-task Docker
+workers; `frontier-agent tasks ui` opens its detachable dashboard. See the
+[persistent tasks guide](../docs/persistent-tasks.zh-CN.md).
+
 Point it at a local repository and give it work in plain language: Stateful
 ReAct reads, searches, edits files, runs commands, and iterates on failures.
 Agent Team adds a coordinator, task board, parallel sub-agents, report collection,
