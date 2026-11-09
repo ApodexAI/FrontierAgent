@@ -438,6 +438,15 @@ def assess_with_rules(
        downgrades: the typed-confirmation gate must still fire.
     """
     base = assess_tool_risk(name, args, cwd)
+    if rules is not None and getattr(rules, "load_error", None):
+        # The file exists but could not be read or parsed. The deny list is
+        # unknown, so the only safe decision is to block rather than fall back
+        # to an empty (permissive) policy.
+        return ToolRisk(
+            RISK_DENY,
+            "saved permission rules could not be read; refusing to run with an unknown policy",
+            base.target,
+        )
     if rules is not None and rules.denies(name, args):
         return ToolRisk(RISK_DENY, "denied by a saved rule", base.target)
     if base.level == RISK_DENY or base.must_ask:
