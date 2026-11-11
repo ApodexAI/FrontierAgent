@@ -364,7 +364,15 @@ class PermissionStore:
         tmp_path = f"{self.path}.{os.getpid()}.{threading.get_ident()}.tmp"
         try:
             os.makedirs(directory, exist_ok=True)
-            with open(tmp_path, "w", encoding="utf-8") as f:
+            mode = 0o600
+            try:
+                existing_mode = os.stat(self.path).st_mode & 0o600
+                if existing_mode:
+                    mode = existing_mode
+            except FileNotFoundError:
+                pass
+            fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump(
                     {"allow": sorted(self.allow), "deny": sorted(self.deny)},
                     f,

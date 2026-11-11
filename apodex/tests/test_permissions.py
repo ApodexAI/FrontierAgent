@@ -95,7 +95,9 @@ def test_gate_blocks_when_rules_could_not_be_loaded(tmp_path: Path) -> None:
 def test_failed_save_keeps_the_previous_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    path = tmp_path / "permissions.json"
+    policy_dir = tmp_path / "policy"
+    policy_dir.mkdir()
+    path = policy_dir / "permissions.json"
     store = PermissionStore({"Bash(npm test)"}, {"Bash(git push)"}, str(path))
     store.save()
     before = path.read_text(encoding="utf-8")
@@ -107,11 +109,13 @@ def test_failed_save_keeps_the_previous_file(
     store.save()
 
     assert path.read_text(encoding="utf-8") == before
-    assert sorted(p.name for p in tmp_path.iterdir()) == ["permissions.json"]
+    assert sorted(p.name for p in policy_dir.iterdir()) == ["permissions.json"]
 
 
 def test_save_replaces_the_file_atomically(tmp_path: Path) -> None:
-    path = tmp_path / "permissions.json"
+    policy_dir = tmp_path / "policy"
+    policy_dir.mkdir()
+    path = policy_dir / "permissions.json"
     store = PermissionStore({"Bash(npm test)"}, {"Bash(git push)"}, str(path))
 
     store.save()
@@ -122,4 +126,17 @@ def test_save_replaces_the_file_atomically(tmp_path: Path) -> None:
     assert reloaded.load_error is None
     assert reloaded.denies("write_file", {})
     assert reloaded.allows("bash", {"command": "npm test"})
-    assert sorted(p.name for p in tmp_path.iterdir()) == ["permissions.json"]
+    assert sorted(p.name for p in policy_dir.iterdir()) == ["permissions.json"]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX file modes")
+def test_save_keeps_restrictive_permissions(tmp_path: Path) -> None:
+    path = tmp_path / "permissions.json"
+    store = PermissionStore({"Bash(npm test)"}, {"Bash(git push)"}, str(path))
+    store.save()
+    os.chmod(path, 0o600)
+
+    store.deny.add("write_file")
+    store.save()
+
+    assert path.stat().st_mode & 0o777 == 0o600
