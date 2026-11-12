@@ -23,11 +23,16 @@ downgrades, so the typed-confirmation gate still fires.
 
 from __future__ import annotations
 
+import contextlib
 import json
+import logging
 import os
 import re
 import shlex
+import threading
 from dataclasses import dataclass, field
+
+logger = logging.getLogger(__name__)
 
 _DEFAULT_PATH = os.path.expanduser("~/.config/apodex/permissions.json")
 # Commands whose first token alone is too coarse — keep two words so
@@ -293,33 +298,99 @@ def rule_for(name: str, args: dict) -> str:
     return name
 
 
+def _string_list(value: object) -> list[str] | None:
+    """Return a JSON rule list, or ``None`` when the shape is invalid.
+
+    ``None`` (the key is absent) is a valid empty list; a string or a list
+    containing non-strings is not, because ``set()`` over it would silently
+    produce a policy different from the one on disk.
+    """
+    if value is None:
+        return []
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        return None
+    return value
+
+
 @dataclass
 class PermissionStore:
-    """Allow/deny rules, persisted to a JSON file."""
+    """Allow/deny rules, persisted to a JSON file.
+
+    ``load_error`` records that the file exists but could not be read or
+    parsed. In that state the policy is unknown, so ``denies`` fails closed:
+    an unreadable deny list must never turn into "no deny rules".
+    """
 
     allow: set[str] = field(default_factory=set)
     deny: set[str] = field(default_factory=set)
     path: str = _DEFAULT_PATH
+    load_error: str | None = None
 
     @classmethod
     def load(cls, path: str = _DEFAULT_PATH) -> PermissionStore:
         try:
             with open(path, encoding="utf-8") as f:
                 d = json.load(f)
-            return cls(set(d.get("allow") or []), set(d.get("deny") or []), path)
-        except Exception:
+        except FileNotFoundError:
+            # No file is a valid first run: there is no policy to lose yet.
+            # A broken symlink also raises FileNotFoundError, but the path
+            # exists; treat that as an unknown policy rather than a first run.
+            if os.path.lexists(path):
+                logger.warning("permission rules path %s exists but cannot be opened", path)
+                return cls(path=path, load_error="permission rules path exists but cannot be opened")
             return cls(path=path)
+        except Exception as exc:
+            # The file is present but unreadable or invalid. Treating this as
+            # an empty policy would silently drop every saved deny rule.
+            logger.warning("could not read permission rules from %s: %s", path, exc)
+            return cls(path=path, load_error=str(exc))
+        if not isinstance(d, dict):
+            logger.warning("permission rules in %s are not a JSON object", path)
+            return cls(path=path, load_error="permission rules must be a JSON object")
+        allow = _string_list(d.get("allow"))
+        deny = _string_list(d.get("deny"))
+        if allow is None or deny is None:
+            logger.warning("permission rules in %s must be string lists", path)
+            return cls(path=path, load_error="permission rules must be string lists")
+        return cls(set(allow), set(deny), path)
 
     def save(self) -> None:
+        """Write the rules atomically.
+
+        A failed write leaves the previous file untouched instead of
+        truncating it first; callers still see a warning in the log rather
+        than a silent success.
+        """
+        directory = os.path.dirname(self.path) or "."
+        tmp_path = f"{self.path}.{os.getpid()}.{threading.get_ident()}.tmp"
         try:
-            os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
-            with open(self.path, "w", encoding="utf-8") as f:
-                json.dump({"allow": sorted(self.allow), "deny": sorted(self.deny)}, f, indent=2)
+            os.makedirs(directory, exist_ok=True)
+            mode = 0o600
+            try:
+                existing_mode = os.stat(self.path).st_mode & 0o600
+                if existing_mode:
+                    mode = existing_mode
+            except FileNotFoundError:
+                pass
+            fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(
+                    {"allow": sorted(self.allow), "deny": sorted(self.deny)},
+                    f,
+                    indent=2,
+                )
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, self.path)
         except Exception:
-            pass
+            logger.warning("could not save permission rules to %s", self.path, exc_info=True)
+            with contextlib.suppress(OSError):
+                os.unlink(tmp_path)
 
     def allows(self, name: str, args: dict) -> bool:
         """True only when every segment and every nested payload matches."""
+        if self.load_error is not None:
+            return False
         if _name_matches(self.allow, name):
             return True
         prefixes = _bash_rule_prefixes(self.allow) if name == "bash" else set()
@@ -346,6 +417,8 @@ class PermissionStore:
 
     def denies(self, name: str, args: dict) -> bool:
         """True when any segment, top-level or nested, matches a deny rule."""
+        if self.load_error is not None:
+            return True
         if _name_matches(self.deny, name):
             return True
         prefixes = _bash_rule_prefixes(self.deny) if name == "bash" else set()
