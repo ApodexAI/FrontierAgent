@@ -15,6 +15,7 @@ from frontier_agent.infra.config import get_config
 from frontier_agent.infra.usage_meter import record_api_request
 from plugins.tools._coerce import coerce_json_list
 from plugins.tools._keenable_search import keenable_search_batch
+from plugins.tools._monid_search import monid_search_batch
 from plugins.tools._parallel_search import (
     parallel_search_batch,
     selected_search_provider,
@@ -466,8 +467,10 @@ async def web_search(
     provider = selected_search_provider()
     if not valid_search_provider(provider):
         return "Error: WEB_SEARCH_PROVIDER must be 'serper', 'parallel', or 'keenable'."
-    if provider in ("parallel", "keenable"):
+    if provider in ("parallel", "keenable", "monid"):
         search_batch = keenable_search_batch if provider == "keenable" else parallel_search_batch
+        if provider == "monid":
+            search_batch = monid_search_batch
         datas = await search_batch(
             queries,
             num_results=num_results,
