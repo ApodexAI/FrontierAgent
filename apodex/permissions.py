@@ -23,6 +23,7 @@ downgrades, so the typed-confirmation gate still fires.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -383,10 +384,8 @@ class PermissionStore:
             os.replace(tmp_path, self.path)
         except Exception:
             logger.warning("could not save permission rules to %s", self.path, exc_info=True)
-            try:
+            with contextlib.suppress(OSError):
                 os.unlink(tmp_path)
-            except OSError:
-                pass
 
     def allows(self, name: str, args: dict) -> bool:
         """True only when every segment and every nested payload matches."""
