@@ -175,6 +175,13 @@ account with higher limits and use that account's
 per query and does not support the tool's custom region, language, or time
 filters; choose Serper when those are needed.
 
+Set `WEB_SEARCH_PROVIDER=monid` and `MONID_API_KEY` to use
+[Monid](https://docs.monid.ai?utm_source=github&utm_medium=oss-pr&utm_campaign=apodexai-frontieragent)
+for `web_search` through Firecrawl's autonomous research agent (one API key, pay per call).
+It returns structured source links, titles, and snippets; research can take minutes.
+Custom region, language, time, location, page, and autocorrect options are not supported.
+Serper remains the default, and `web_fetch` keeps its existing provider.
+
 Start the TUI:
 
 ```bash
