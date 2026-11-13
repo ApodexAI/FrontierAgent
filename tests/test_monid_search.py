@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import importlib
 import json
 
@@ -34,6 +35,7 @@ async def test_monid_request_and_native_result(monkeypatch, module_name):
                 "prompt": "Research this query and return up to 10 web results "
                           "with source links, titles and snippets: 中文",
                 "schema": monid._RESULT_SCHEMA,
+                "maxCredits": 100,
             },
         }
         assert "中文".encode() in request.content
@@ -90,6 +92,43 @@ async def test_monid_polling_and_errors(monkeypatch, scenario):
         "poll_http": "Monid research returned HTTP 503.", "failed": "Monid run FAILED.",
     }[scenario]
     assert len(calls) == (1 if scenario == "http" else 2)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failing", [False, True])
+async def test_monid_queries_run_concurrently(monkeypatch, failing):
+    monkeypatch.setenv("MONID_API_KEY", "test-key")
+    posted, polls, real_sleep = [], [], asyncio.sleep
+
+    async def yield_once(seconds):
+        await real_sleep(0)
+
+    def handle(request):
+        if request.method == "POST":
+            query = json.loads(request.content)["input"]["body"]["prompt"].rsplit(": ", 1)[1]
+            posted.append(query)
+            if failing and query == "b":
+                return httpx.Response(401, json={"code": 401, "message": "Bad key"})
+            return httpx.Response(202, json={"runId": query})
+        polls.append(request.url.path)
+        assert posted == ["a", "b"]  # both runs were submitted before either was polled
+        if failing:
+            return httpx.Response(200, json={"status": "RUNNING"})
+        output = {"organic": [{"title": request.url.path.rsplit("/", 1)[1]}]}
+        return httpx.Response(200, json={"status": "COMPLETED", "output": output})
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handle))
+    monkeypatch.setattr(monid.httpx, "AsyncClient", lambda **kwargs: client)
+    monkeypatch.setattr(monid.asyncio, "sleep", yield_once)
+    result = await monid.monid_search_batch(["a", "b"], num_results=1)
+    if not failing:
+        assert result == [{"organic": [{"title": "a"}]}, {"organic": [{"title": "b"}]}]
+        return
+    assert result == "Monid research returned HTTP 401."
+    seen = len(polls)
+    await real_sleep(0)
+    await real_sleep(0)
+    assert len(polls) == seen  # the unfinished run was cancelled, not left polling
 
 
 def test_default_provider_unchanged_without_monid_key(monkeypatch):

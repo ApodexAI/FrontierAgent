@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 _API_URL = "https://api.monid.ai"
 _RUN_TIMEOUT = 300.0
+_MAX_CREDITS = 100  # upper bound on the Firecrawl credits one query may consume
 _RESULT_SCHEMA = {
     "type": "object",
     "properties": {"organic": {"type": "array", "items": {
@@ -36,6 +37,7 @@ async def _search(
             "prompt": f"Research this query and return up to {num_results} web results "
                       f"with source links, titles and snippets: {query}",
             "schema": _RESULT_SCHEMA,
+            "maxCredits": _MAX_CREDITS,
         }},
     }
     response = await client.post(
@@ -71,7 +73,7 @@ async def _search(
 async def monid_search_batch(
     queries: list[str], *, num_results: int, gl: str = "us", hl: str = "en", tbs: str = "",
 ) -> list[dict[str, Any]] | str:
-    """Research queries through Firecrawl, returning native Serper-shaped results."""
+    """Research queries through Firecrawl concurrently, returning native Serper-shaped results."""
     if gl != "us" or hl != "en" or tbs:
         return (
             "Monid research does not support custom region, language, or "
@@ -88,14 +90,20 @@ async def monid_search_batch(
     }
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=10.0)) as client:
-            results = []
-            for query in queries:
-                result = await _search(client, headers, query, num_results)
+            tasks = [
+                asyncio.create_task(_search(client, headers, query, num_results))
+                for query in queries
+            ]
+            try:
+                results = list(await asyncio.gather(*tasks))
+            except BaseException:
+                for task in tasks:
+                    task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+                raise
+            for result in results:
                 record_api_request("monid", errors=int(isinstance(result, str)))
-                if isinstance(result, str):
-                    return result
-                results.append(result)
-            return results
+            return next((result for result in results if isinstance(result, str)), results)
     except httpx.HTTPStatusError as error:
         logger.warning("Monid research request failed with HTTP %d", error.response.status_code)
         return f"Monid research returned HTTP {error.response.status_code}."
