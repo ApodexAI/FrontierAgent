@@ -57,6 +57,7 @@ comments and the SGLang reference are the source of truth for those variables.
 | TUI panes, keyboard workflow, previews, approvals, and Agent Team intervention | [English user guide](tui-user-guide.md) / [中文使用教程](tui-user-guide.zh-CN.md) |
 | CLI, TUI, themes, slash commands, approvals, and terminal internals | [`apodex/README.md`](../apodex/README.md) **(reference)** |
 | High-level architecture and sandbox boundaries | [Framework architecture](framework.md) |
+| Submit persistent background tasks and supervise them in a TUI | [Persistent tasks (中文)](persistent-tasks.zh-CN.md) |
 | Security policy and vulnerability reporting | [Security policy](../SECURITY.md) |
 
 The root README's job is the product overview, a short quick start, and results.
@@ -94,6 +95,7 @@ reference; keeping those roles separate avoids duplicating setup instructions.
 | Task | Document |
 |---|---|
 | Understand runtime flow, observers, teams, and package boundaries | [Framework architecture](framework.md) |
+| Review the proposed Super Agent product and architecture upgrade | [Super Agent design proposal (中文)](super-agent-product-design.zh-CN.md) |
 | Author and register a workflow plugin | [Writing a workflow](workflows.md) |
 | Develop and submit changes | [Contributing](../CONTRIBUTING.md) |
 | Understand the frozen Textual + Rich decision | [TUI framework decision](python_terminal_tui_ai_agent_guide.md) **(design record, Chinese)** |
