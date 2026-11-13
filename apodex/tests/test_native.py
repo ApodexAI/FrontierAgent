@@ -4,6 +4,8 @@ import asyncio
 import os
 from pathlib import Path
 
+import pytest
+
 from apodex import cli, docker, sandbox
 from apodex.native import prepare_native_runtime
 from apodex.sandbox import BWRAP, CONTAINER, NATIVE, Strategy, resolve_strategy
@@ -330,6 +332,38 @@ def test_bwrap_sandbox_rebuilds_when_workspace_changes(
     assert second.killed is False
     assert second.workspace == str(second_workspace.resolve())
     assert second.binds == ((str(second_workspace.resolve()),) * 2 + (False,),)
+
+
+@pytest.mark.parametrize(
+    "command",
+    ["(sleep 2; touch marker) & wait", "(sleep 2; touch marker) & exit 0"],
+    ids=["running-shell", "exited-shell"],
+)
+@pytest.mark.parametrize("interruption", ["timeout", "cancellation"])
+async def test_run_shell_kills_the_whole_command_on_interruption(
+    tmp_path, command, interruption,
+) -> None:
+    """An interrupted command must not keep writing to the workspace.
+
+    The subshell is a grandchild holding the output pipes, so killing only the
+    shell would still leave it alive to write the marker. Cleanup must also run
+    when the shell has already exited while its child still holds the pipes.
+    """
+    if interruption == "timeout":
+        with pytest.raises(TimeoutError):
+            await sandbox.run_shell(command, str(tmp_path), 1, Strategy(NATIVE, "test"))
+    else:
+        task = asyncio.create_task(sandbox.run_shell(
+            command, str(tmp_path), 10,
+            Strategy(NATIVE, "test"),
+        ))
+        await asyncio.sleep(1)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    await asyncio.sleep(2)
+
+    assert not (tmp_path / "marker").exists()
 
 
 def test_macos_falls_back_to_native_when_docker_is_unavailable(
