@@ -7,7 +7,8 @@ responsibly.
 
 **Do not open a public GitHub issue for security vulnerabilities.**
 
-Instead, please email: **security@apodex.ai**
+Please use [GitHub private vulnerability reporting](https://github.com/ApodexAI/FrontierAgent/security/advisories/new)
+or email **support@apodex.ai** with the subject prefix **[Security]**.
 
 Include the following in your report:
 
