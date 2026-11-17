@@ -3,12 +3,11 @@ from __future__ import annotations
 import asyncio
 import json
 
-from frontier_agent.components.agent_bus import SubAgentResult
+from frontier_agent.components.agent_bus import SubAgentResult, fan_in
 from frontier_agent.components.observers.task_board import TaskBoardObserver
 from frontier_agent.components.observers.trajectory import TrajectoryFileObserver
 from frontier_agent.core.loop_types import LoopConfig, TurnContext
 from plugins.tools.task_board import build_task_board_observer
-from frontier_agent.components.agent_bus import fan_in
 
 
 class _NativeTool:

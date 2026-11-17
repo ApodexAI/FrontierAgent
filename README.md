@@ -175,6 +175,13 @@ account with higher limits and use that account's
 per query and does not support the tool's custom region, language, or time
 filters; choose Serper when those are needed.
 
+Set `WEB_SEARCH_PROVIDER=specstream` to use the
+[SpecStream search API](https://specstream.ai/agents.md) for `web_search`.
+With `SPECSTREAM_API_KEY` set, searches go through your account;
+without a key it uses the SpecStream keyless endpoint.
+SpecStream returns up to 100 results per query.
+This does not change `web_fetch` either.
+
 Start the TUI:
 
 ```bash

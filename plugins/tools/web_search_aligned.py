@@ -30,6 +30,7 @@ from plugins.tools._parallel_search import (
     selected_search_provider,
     valid_search_provider,
 )
+from plugins.tools._specstream_search import specstream_search_batch
 from plugins.tools.web_search import is_snippet_blocked_result
 
 logger = logging.getLogger(__name__)
@@ -285,16 +286,23 @@ async def web_search_aligned(
 
     provider = selected_search_provider()
     if not valid_search_provider(provider):
-        return "[ERROR]: WEB_SEARCH_PROVIDER must be 'serper', 'parallel', or 'keenable'."
-    if provider in ("parallel", "keenable"):
-        backend = "Keenable search" if provider == "keenable" else "Parallel Search MCP"
+        return "[ERROR]: WEB_SEARCH_PROVIDER must be 'serper', 'parallel', 'keenable', or 'specstream'."
+    if provider in ("parallel", "keenable", "specstream"):
+        if provider == "specstream":
+            backend = "SpecStream Search MCP"
+            search_batch = specstream_search_batch
+        elif provider == "keenable":
+            backend = "Keenable search"
+            search_batch = keenable_search_batch
+        else:
+            backend = "Parallel Search MCP"
+            search_batch = parallel_search_batch
         if location is not None or page not in (None, 1) or autocorrect is not None:
             return (
                 f"[ERROR]: {backend} does not support location, page, or "
                 "autocorrect options. Select Serper to use those search options."
             )
         result_limit = 10 if num is None else max(1, min(num, 100))
-        search_batch = keenable_search_batch if provider == "keenable" else parallel_search_batch
         datas = await search_batch(
             queries,
             num_results=result_limit,
