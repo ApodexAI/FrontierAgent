@@ -438,7 +438,7 @@ class TaskRunnerMixin:
     async def _run_native_workflow(self, task: str, profile: Any) -> None:
         """Run one of the shipped workflow DAGs from the terminal.
 
-        ``BenchmarkSession`` is the project's small, scoped runtime bootstrap:
+        ``WorkflowSession`` is the project's small, scoped runtime bootstrap:
         it registers the AgentBus, workflow roles, and the full tool registry,
         then restores the caller's registry after the task.  This is important
         for Agent Team: merely placing its tools in the generic terminal loop
@@ -453,7 +453,7 @@ class TaskRunnerMixin:
         """
         from apodex.steer import SteerInbox
         from apodex.todo import clear_todos
-        from benchmarks.public.core.kernel_adapter import BenchmarkSession
+        from frontier_agent.runtime import WorkflowSession
 
         clear_todos()
         workflow_profile = profile.workflow_profile
@@ -515,7 +515,7 @@ class TaskRunnerMixin:
         state: dict | None = None
         status = "ok"
         try:
-            async with BenchmarkSession() as runtime:
+            async with WorkflowSession() as runtime:
                 state = await runtime.run(
                     workflow_input,
                     meta=metadata,

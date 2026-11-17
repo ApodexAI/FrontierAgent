@@ -1022,7 +1022,9 @@ def _swarm_observers(
             observers.append(wt)
 
     # The optional SDK protocol stream is not part of the OSS runtime.
-    return observers
+    from frontier_agent.core.runtime.observer_scope import execution_observers
+
+    return [*execution_observers(), *observers]
 
 
 # Cap on per-job denial logs held for the result adapter. Only jobs whose
