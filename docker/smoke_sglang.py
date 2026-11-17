@@ -10,7 +10,6 @@ import urllib.error
 import urllib.request
 from collections.abc import Callable
 
-
 BASE_URL = os.environ.get("SGLANG_BASE_URL", "http://127.0.0.1:30000").rstrip("/")
 MODEL = os.environ.get("SGLANG_SERVED_MODEL_NAME", "local-model")
 

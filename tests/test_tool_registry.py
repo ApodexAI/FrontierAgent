@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from plugins.tools import ToolRegistry, get_builtin_tools
 
-
 EXPECTED_TOOLS = {
     "add_task",
     "assign_task",

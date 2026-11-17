@@ -519,7 +519,7 @@ def _observer() -> tuple[object, object]:
 
 
 def _pushed(channel) -> list[DemoEvent]:
-    return list(channel._items)  # noqa: SLF001 - inspecting the transport under test
+    return list(channel._items)
 
 
 async def test_a_rolled_back_turn_tells_the_ui_to_drop_the_draft() -> None:
