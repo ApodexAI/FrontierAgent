@@ -41,9 +41,12 @@ files configure the boundary with that variable.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 import shlex
+import signal
+import socket
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -253,13 +256,104 @@ async def run_shell(
             getattr(result, "stderr", "") or "",
         )
 
+    if sys.platform.startswith("linux"):
+        return await _run_supervised_shell(command, cwd, timeout)
+    return await _run_group_shell(command, cwd, timeout)
+
+
+# Run by file path under -P so neither cwd nor this package's directory
+# lands on sys.path: a workspace's own apodex/ or ctypes.py must not
+# shadow the supervisor or the stdlib modules it imports.
+_SUPERVISOR = str(Path(__file__).with_name("_shell_supervisor.py"))
+
+
+async def _run_supervised_shell(
+    command: str, cwd: str, timeout: int,
+) -> tuple[int, str, str]:
+    """Run under a Linux child subreaper, including escaped descendants."""
+    parent_control, child_control = socket.socketpair()
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable, "-P", _SUPERVISOR,
+            str(child_control.fileno()), command,
+            cwd=cwd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            pass_fds=(child_control.fileno(),),
+            start_new_session=True,
+        )
+    except BaseException:
+        parent_control.close()
+        raise
+    finally:
+        child_control.close()
+
+    parent_control.setblocking(False)
+
+    async def collect() -> tuple[bytes, bytes, bytes]:
+        assert proc.stdout is not None and proc.stderr is not None
+        loop = asyncio.get_running_loop()
+        out, err, status = await asyncio.gather(
+            proc.stdout.read(), proc.stderr.read(),
+            loop.sock_recv(parent_control, 32),
+        )
+        return out, err, status
+
+    try:
+        try:
+            out, err, status = await asyncio.wait_for(collect(), timeout=timeout)
+        except BaseException:
+            # The supervisor kills its shell group, then every adopted child.
+            # Closing the socket is another kill instruction if the write fails.
+            with contextlib.suppress(OSError):
+                parent_control.send(b"K")
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(proc.communicate(), timeout=5)
+            raise
+        if not status:
+            # The supervisor exits before running the shell when it cannot
+            # supervise it (no subreaper, no /proc children list). Its exit
+            # code is not the command's, so report it as unavailable.
+            await asyncio.wait_for(proc.wait(), timeout=5)
+            detail = err.decode("utf-8", "replace").strip().splitlines()
+            raise RuntimeError(
+                "native shell supervisor is unavailable on this system "
+                f"(exit {proc.returncode}); command was not run"
+                + (f": {detail[-1]}" if detail else "")
+            )
+        with contextlib.suppress(OSError):
+            parent_control.send(b"S")
+        await asyncio.wait_for(proc.wait(), timeout=5)
+        return (
+            int(status),
+            out.decode("utf-8", "replace"),
+            err.decode("utf-8", "replace"),
+        )
+    finally:
+        parent_control.close()
+
+
+async def _run_group_shell(
+    command: str, cwd: str, timeout: int,
+) -> tuple[int, str, str]:
+    """Use process-group cleanup on platforms without Linux subreapers."""
     proc = await asyncio.create_subprocess_shell(
         command,
         cwd=cwd,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        start_new_session=True,
     )
-    out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+    completed = False
+    try:
+        out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        completed = True
+    finally:
+        if not completed:
+            with contextlib.suppress(OSError):
+                os.killpg(proc.pid, signal.SIGKILL)
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(proc.wait(), timeout=5)
     return (
         proc.returncode or 0,
         out.decode("utf-8", "replace"),
