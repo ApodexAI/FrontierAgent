@@ -83,6 +83,14 @@ providers:
     api_key: ${OPENROUTER_API_KEY}
     base_url: https://openrouter.ai/api
 
+  # llm.buzz: another OpenAI-compatible gateway. Its model ids are
+  # vendor-namespaced (``anthropic/claude-sonnet-5``), so a profile can name
+  # one directly with ``type: openai_compat``, as with openrouter.
+  llm_buzz:
+    type: openai_compat
+    api_key: ${LLM_BUZZ_API_KEY}
+    base_url: ${LLM_BUZZ_BASE_URL:-https://api.llm.buzz/api/v1}
+
   # A model you serve yourself (SGLang / vLLM / Ollama). Most self-hosted
   # stacks accept any non-empty key, hence the placeholder default.
   local:
