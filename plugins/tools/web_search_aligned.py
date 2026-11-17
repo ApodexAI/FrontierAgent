@@ -25,6 +25,7 @@ from tenacity import (
 from frontier_agent.core.tool import tool
 from frontier_agent.infra.usage_meter import record_api_request
 from plugins.tools._keenable_search import keenable_search_batch
+from plugins.tools._monid_search import monid_search_batch
 from plugins.tools._parallel_search import (
     parallel_search_batch,
     selected_search_provider,
@@ -286,8 +287,10 @@ async def web_search_aligned(
     provider = selected_search_provider()
     if not valid_search_provider(provider):
         return "[ERROR]: WEB_SEARCH_PROVIDER must be 'serper', 'parallel', or 'keenable'."
-    if provider in ("parallel", "keenable"):
+    if provider in ("parallel", "keenable", "monid"):
         backend = "Keenable search" if provider == "keenable" else "Parallel Search MCP"
+        if provider == "monid":
+            backend = "Monid research"
         if location is not None or page not in (None, 1) or autocorrect is not None:
             return (
                 f"[ERROR]: {backend} does not support location, page, or "
@@ -295,6 +298,8 @@ async def web_search_aligned(
             )
         result_limit = 10 if num is None else max(1, min(num, 100))
         search_batch = keenable_search_batch if provider == "keenable" else parallel_search_batch
+        if provider == "monid":
+            search_batch = monid_search_batch
         datas = await search_batch(
             queries,
             num_results=result_limit,
