@@ -83,6 +83,12 @@ providers:
     api_key: ${OPENROUTER_API_KEY}
     base_url: https://openrouter.ai/api
 
+  # LLMTR: OpenAI-compatible catalog at a single endpoint and key.
+  llmtr:
+    type: openai_compat
+    api_key: ${LLMTR_API_KEY}
+    base_url: ${LLMTR_BASE_URL:-https://llmtr.com/v1}
+
   # A model you serve yourself (SGLang / vLLM / Ollama). Most self-hosted
   # stacks accept any non-empty key, hence the placeholder default.
   local:
