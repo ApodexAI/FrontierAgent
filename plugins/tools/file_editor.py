@@ -210,6 +210,9 @@ async def file_editor_str_replace(path: str, old_str: str, new_str: str) -> str:
             return f"Error: Cannot read {path}: file not found"
         try:
             content = local_path.read_text(encoding="utf-8")
+            # read_text turns CRLF into "\n" (so old_str written with "\n" matches); write the
+            # file back with the line ending it had, not the platform's, so one edit stays one line.
+            newline = "\r\n" if b"\r\n" in local_path.read_bytes() else "\n"
         except Exception as e:
             return f"Error editing {path}: {e}"
 
@@ -225,7 +228,9 @@ async def file_editor_str_replace(path: str, old_str: str, new_str: str) -> str:
                 "Provide a more specific string that appears exactly once."
             )
         try:
-            local_path.write_text(content.replace(old_str, new_str, 1), encoding="utf-8")
+            local_path.write_text(
+                content.replace(old_str, new_str, 1), encoding="utf-8", newline=newline
+            )
         except Exception as e:
             return f"Error editing {path}: {e}"
 
