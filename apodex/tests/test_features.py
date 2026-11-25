@@ -849,6 +849,20 @@ def test_native_workflow_run_is_steerable(tmp_path, monkeypatch):
     assert session._inbox is None
 
 
+def _stub_workflow_result(state, monkeypatch):
+    class _Runtime:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def run(self, task, *, meta, pipeline_id, extra_input=None):
+            return state
+
+    monkeypatch.setattr("benchmarks.public.core.kernel_adapter.BenchmarkSession", _Runtime)
+
+
 def _run_workflow_returning(state: dict, tmp_path, monkeypatch) -> None:
     """Drive ``_run_native_workflow`` against a workflow stubbed to return *state*."""
     from apodex.config import ModelConfig
@@ -862,23 +876,35 @@ def _run_workflow_returning(state: dict, tmp_path, monkeypatch) -> None:
         workflow = "agent_team"
         workflow_profile = "tui"
 
-    class _Runtime:
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *exc):
-            return False
-
-        async def run(self, task, *, meta, pipeline_id, extra_input=None):
-            return state
-
-    monkeypatch.setattr("benchmarks.public.core.kernel_adapter.BenchmarkSession", _Runtime)
+    _stub_workflow_result(state, monkeypatch)
     session = TerminalSession(
         cfg=ModelConfig(model="fake", api_key="x", base_url=None), cwd=str(tmp_path),
         renderer=Renderer(theme="mono"), auto_approve=True, max_turns=5,
         interactive=False, mode="coding",
     )
     asyncio.run(session._run_native_workflow("investigate", _Profile()))
+
+
+@pytest.mark.parametrize(
+    ("state", "expected"),
+    [
+        ({"stopped_by": "llm_error", "llm_error": "Error code: 401"}, 1),
+        ({"stopped_by": "workflow_complete", "final_answer": "Done."}, 0),
+    ],
+)
+def test_print_exit_status_follows_workflow_result(state, expected, tmp_path, monkeypatch):
+    from apodex import cli, profiles
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(profiles, "_CACHE", {})
+    monkeypatch.setattr(cli, "_route_engine_logs", lambda *args: None)
+    monkeypatch.setenv("LLM_PROVIDER", "openai")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://example.invalid/v1")
+    monkeypatch.setenv("OPENAI_MODEL", "test-model")
+    _stub_workflow_result(state, monkeypatch)
+
+    assert cli.main(["--no-sandbox", "--mode", "react", "-p", "investigate"]) == expected
 
 
 def test_native_workflow_llm_error_is_not_reported_as_delivery(

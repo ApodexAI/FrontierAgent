@@ -387,8 +387,8 @@ class _RecordingSession:
         self.session_id = "recorded-session"
         self.history: list = []
 
-    async def run_task(self, task: str) -> None:
-        return None
+    async def run_task(self, task: str) -> int:
+        return 0
 
 
 @pytest.fixture

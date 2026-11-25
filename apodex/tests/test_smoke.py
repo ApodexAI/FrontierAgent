@@ -176,7 +176,7 @@ def test_llm_error_surfaced_clearly(tmp_path, monkeypatch, capsys):
 
     monkeypatch.setattr(sess_mod, "run_agent_loop", fake_loop)
     session = _session(str(tmp_path), auto_approve=True, interactive=False, script=[])
-    asyncio.run(session.run_task("do something"))  # must not raise
+    assert asyncio.run(session.run_task("do something")) == 1
 
     out = capsys.readouterr().out
     assert "LLM configuration error" in out, out
@@ -311,7 +311,7 @@ def test_llm_error_exception_surfaced(tmp_path, monkeypatch, capsys):
 
     monkeypatch.setattr(sess_mod, "run_agent_loop", boom)
     session = _session(str(tmp_path), auto_approve=True, interactive=False, script=[])
-    asyncio.run(session.run_task("do something"))  # must not raise
+    assert asyncio.run(session.run_task("do something")) == 1
 
     out = capsys.readouterr().out
     assert "LLM call failed" in out, out
@@ -330,7 +330,7 @@ def test_non_llm_exception_not_mislabeled(tmp_path, monkeypatch, capsys):
 
     monkeypatch.setattr(sess_mod, "run_agent_loop", boom)
     session = _session(str(tmp_path), auto_approve=True, interactive=False, script=[])
-    asyncio.run(session.run_task("do something"))  # must not raise
+    assert asyncio.run(session.run_task("do something")) == 1
 
     out = capsys.readouterr().out
     assert "agent loop failed" in out, out
