@@ -577,8 +577,7 @@ async def _amain(argv: list[str] | None = None) -> int:
         if not args.task:
             print("error: -p/--print requires a TASK argument", file=sys.stderr)
             return 2
-        await session.run_task(args.task)
-        return 0
+        return await session.run_task(args.task)
 
     if args.task:
         # Run the given task once, then drop into the REPL for follow-ups.

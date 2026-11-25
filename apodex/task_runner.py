@@ -241,11 +241,11 @@ class TaskRunnerMixin:
         stats = await asyncio.to_thread(self.journal.revertable_diffstat)
         self.r.changes(stats)
 
-    async def run_task(self, task: str) -> None:
+    async def run_task(self, task: str) -> int:
+        """Run a task and return its CLI exit status."""
         profile = get_profile(self.mode)
         if profile.workflow:
-            await self._run_native_workflow(task, profile)
-            return
+            return await self._run_native_workflow(task, profile)
 
         # Fresh plan per task — the todo store is process-global, so clear any
         # leftover checklist from a previous task (it overwrites on todo_write,
@@ -379,8 +379,7 @@ class TaskRunnerMixin:
                     self.history, keep_recent=16,
                 )
                 self.usage.compactions += 1
-                await self.run_task("")  # resume on the compacted history
-                return
+                return await self.run_task("")  # resume on the compacted history
             if result.stopped_by == "user_rejected":
                 # User declined an action → stop cleanly and hand control back
                 # (don't force a summary answer; that would just keep talking).
@@ -434,8 +433,11 @@ class TaskRunnerMixin:
         # Follow-up steering: run anything still queued (unless the task errored).
         if leftover and status != "error":
             await self.run_task("\n".join(leftover))
+        if status == "error" or (result is not None and result.stopped_by == "llm_error"):
+            return 1
+        return 130 if status == "interrupted" else 0
 
-    async def _run_native_workflow(self, task: str, profile: Any) -> None:
+    async def _run_native_workflow(self, task: str, profile: Any) -> int:
         """Run one of the shipped workflow DAGs from the terminal.
 
         ``BenchmarkSession`` is the project's small, scoped runtime bootstrap:
@@ -459,7 +461,7 @@ class TaskRunnerMixin:
         workflow_profile = profile.workflow_profile
         if not workflow_profile:
             self.r.error(f"mode {self.mode!r} is missing its workflow profile")
-            return
+            return 1
 
         inbox = SteerInbox(self.r)
         observer = TerminalObserver(
@@ -543,7 +545,7 @@ class TaskRunnerMixin:
             # (re-running into a broken workflow just repeats the error).
             if leftover and status != "error":
                 await self.run_task("\n".join(leftover))
-            return
+            return 130 if status == "interrupted" else 1
 
         state = state or {}
         final = str(state.get("final_answer") or state.get("final_content") or "").strip()
@@ -570,7 +572,7 @@ class TaskRunnerMixin:
                 # As elsewhere, a genuine failure discards the queue — but say
                 # so, or the lines the user typed vanish without a trace.
                 self.r.note("■ queued input discarded — fix the LLM error and retype it")
-            return
+            return 1
         complete = _is_complete_run(
             stopped_by,
             answer_status=str(state.get("answer_status") or ""),
@@ -624,6 +626,7 @@ class TaskRunnerMixin:
         # Follow-up steering: anything still queued runs as the next task.
         if leftover:
             await self.run_task("\n".join(leftover))
+        return 0
 
     async def _force_final(self, result: Any) -> str:
         """If the loop ended without a usable answer, do one tool-free LLM call.
